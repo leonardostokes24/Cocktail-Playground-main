@@ -260,12 +260,8 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
         const parentAbs = HierarchyManager.getAbsolutePosition(finalParent, nds);
 
+        // Containers restrict dragging with extent:'parent'; spec parenting is loose (no extent)
         const isContainer = finalParent.type === 'container';
-        const isLockedConnectedSpec = finalParent.type === 'spec' &&
-                                    (finalParent.data?.isLocked !== false) &&
-                                    edges.some(e => e.source === draggedNode.id && e.target === finalParent.id);
-
-        const shouldRestrict = isContainer || isLockedConnectedSpec;
 
         return nds.map(node => {
           if (node.id === draggedNode.id) {
@@ -273,7 +269,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
               ...node,
               parentId: finalParent.id,
               position: { x: abs.x - parentAbs.x, y: abs.y - parentAbs.y },
-              extent: shouldRestrict ? 'parent' : undefined
+              extent: isContainer ? 'parent' : undefined
             } as Node;
           }
           return node;
@@ -331,7 +327,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         const isLocked = targetCandidate?.data?.isLocked ?? true;
 
         if (isLocked) {
-          // LOCK MODE — ingredient should live inside its connected spec
+          // LOCK MODE — ingredient travels with its connected spec (parentId only, no extent so it can still be dragged freely)
           if (specEdge && node.parentId !== specEdge.target) {
             const targetNode = nodeMap.get(specEdge.target);
             if (!targetNode) return node;
@@ -341,12 +337,11 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
             return {
               ...node,
               parentId: specEdge.target,
-              extent: (targetCandidate?.data?.isLocked !== false) ? 'parent' : undefined,
+              extent: undefined,
               position: { x: nodeAbs.x - parentAbs.x, y: nodeAbs.y - parentAbs.y },
             };
           }
           if (!specEdge && node.parentId && nodeMap.get(node.parentId)?.type === 'spec') {
-            if (!nodeMap.get(node.parentId)) return node;
             changed = true;
             const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
             return { ...node, parentId: undefined, extent: undefined, position: nodeAbs };
@@ -354,7 +349,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         } else {
           // LOOSE MODE — detach from spec parent so ingredients float freely
           if (node.parentId && nodeMap.get(node.parentId)?.type === 'spec') {
-            if (!nodeMap.get(node.parentId)) return node;
             changed = true;
             const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
             return { ...node, parentId: undefined, extent: undefined, position: nodeAbs };
@@ -580,7 +574,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         clusterNodes.push({
           id: ingId, type: 'ingredient',
           position: { x: -300, y: (idx * 100) - ((config.ingredients.length * 100) / 2) + 100 },
-          parentId: specId, extent: 'parent',
+          parentId: specId,
           data: { label: ing.label, type: ing.type },
         });
       });
@@ -611,7 +605,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         clusterNodes.push({
           id: ingId, type: 'ingredient',
           position: { x: -300, y: (idx * 100) - ((ings.length * 100) / 2) + 100 },
-          parentId: specId, extent: 'parent',
+          parentId: specId,
           data: { label: ing.label, type: ing.type },
         });
       });
