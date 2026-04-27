@@ -3,6 +3,7 @@ import { Handle, Position, useReactFlow } from '@xyflow/react';
 import { supabase } from '../services/supabaseClient';
 import { Save } from 'lucide-react';
 import { parseAmount } from '../utils/pricing';
+import { HierarchyManager } from '../utils/hierarchy';
 
 export default function SpecNode({ id, data, selected }: any) {
   const { setNodes, getNodes, getEdges } = useReactFlow();
@@ -13,16 +14,18 @@ export default function SpecNode({ id, data, selected }: any) {
   const totalCost = useMemo(() => {
     const edges = getEdges().filter(e => e.target === id);
     const nodes = getNodes();
-    
     return edges.reduce((sum, edge) => {
       const sourceNode = nodes.find(n => n.id === edge.source);
       if (sourceNode?.type === 'ingredient' && sourceNode.data?.unitPrice) {
-        const amount = parseAmount(edge.label || '');
-        return sum + (amount * sourceNode.data.unitPrice);
+        const amount = parseAmount(edge.label as string || '');
+        return sum + (amount * (sourceNode.data.unitPrice as number));
       }
       return sum;
     }, 0);
-  }, [getEdges, getNodes]);
+  // data.ingredientsList changes whenever edges connecting to this spec change,
+  // which is the correct trigger for recalculating cost.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, data.ingredientsList, getEdges, getNodes]);
 
   const isMatched = data.isMatched && !data.isCustomOverride;
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState, useEffect } from 'react';
+import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -6,6 +6,7 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  useStore,
   addEdge,
   useReactFlow,
   type Connection,
@@ -57,7 +58,8 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [showMiniMap, setShowMiniMap] = useState(true);
   const { screenToFlowPosition, getNode, zoomIn, zoomOut, fitView, getViewport, setViewport } = useReactFlow();
-  const [zoomLevel, setZoomLevel] = useState(100);
+  // Reactive zoom — only re-renders when the rounded integer zoom value changes.
+  const zoomLevel = useStore((s: any) => Math.round(s.transform[2] * 100));
   const [isExporting, setIsExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -133,24 +135,15 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     setGalleryOpen(false);
   };
 
-  // Sync zoom level for display
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const canvasEl = document.querySelector('.react-flow__viewport');
-      if (canvasEl) {
-        const style = window.getComputedStyle(canvasEl);
-        const matrix = new DOMMatrixReadOnly(style.transform);
-        setZoomLevel(Math.round(matrix.a * 100));
-      }
-    }, 200);
-    return () => clearInterval(interval);
-  }, []);
+  // Track lock states — memoized so the parenting effect only re-runs when
+  // a spec's isLocked flag actually changes, not on every node mutation.
+  const lockStatesHash = useMemo(
+    () => nodes.filter(n => n.type === 'spec').map(n => `${n.id}:${n.data?.isLocked ?? true}`).join('|'),
+    [nodes]
+  );
 
-  // Track lock states to trigger structural re-sync
-  const lockStatesHash = nodes
-    .filter(n => n.type === 'spec')
-    .map(n => `${n.id}:${n.data?.isLocked ?? true}`)
-    .join('|');
+  // Memoize sorted nodes so the O(n log n) sort isn't repeated on every render.
+  const sortedNodes = useMemo(() => sortNodesByHierarchy(nodes), [nodes]);
 
   // --- Modal States ---
   const [modalConfig, setModalConfig] = useState<{
@@ -234,7 +227,10 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
       return nodesChanged ? updatedNodes : currentNodes;
     });
-  }, [edges, nodes, setNodes]);
+  // Only re-run when edges change. currentNodes is always fresh inside
+  // the setNodes updater callback, so removing `nodes` from deps here
+  // is safe and breaks the circular update loop.
+  }, [edges, setNodes]);
 
   const onNodeDragStop = useCallback((_: any, draggedNode: Node) => {
     setNodes((nds) => {
@@ -311,69 +307,57 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     });
   }, [setNodes, edges]);
 
-  // Sync parenting with edges
+  // Sync parenting with edges — uses a Map for O(1) node lookups instead of
+  // repeated Array.find() calls (was O(n) per ingredient per edge change).
   useEffect(() => {
     setNodes((nds) => {
       let changed = false;
+      const nodeMap = new Map<string, Node>(nds.map(n => [n.id, n]));
+      const edgesBySource = new Map<string, Edge[]>();
+      for (const e of edges) {
+        const arr: Edge[] = edgesBySource.get(e.source) ?? [];
+        arr.push(e);
+        edgesBySource.set(e.source, arr);
+      }
+
       const nextNodes = nds.map(node => {
         if (node.type !== 'ingredient') return node;
 
-        const currentEdges = edges.filter(e => e.source === node.id);
-        const specEdge = currentEdges.find(e => {
-          const target = nds.find(n => n.id === e.target);
-          return target?.type === 'spec';
-        });
+        const outgoing: Edge[] = edgesBySource.get(node.id) ?? [];
+        const specEdge = outgoing.find(e => nodeMap.get(e.target)?.type === 'spec');
 
-        const targetNodeId = specEdge?.target || node.parentId;
-        const targetNodeCandidate = nds.find(n => n.id === targetNodeId);
-        const nodeEffectiveLock = targetNodeCandidate?.data?.isLocked ?? true;
+        const targetNodeId = specEdge?.target ?? node.parentId;
+        const targetCandidate = nodeMap.get(targetNodeId ?? '');
+        const isLocked = targetCandidate?.data?.isLocked ?? true;
 
-        // LOCK MODE: Ensure parented if connected
-        if (nodeEffectiveLock) {
+        if (isLocked) {
+          // LOCK MODE — ingredient should live inside its connected spec
           if (specEdge && node.parentId !== specEdge.target) {
-            const targetNode = nds.find(n => n.id === specEdge.target);
+            const targetNode = nodeMap.get(specEdge.target);
             if (!targetNode) return node;
-
             changed = true;
             const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
             const parentAbs = HierarchyManager.getAbsolutePosition(targetNode, nds);
-
             return {
               ...node,
               parentId: specEdge.target,
-              extent: (targetNodeCandidate?.data?.isLocked !== false) ? 'parent' : undefined,
-              position: { x: nodeAbs.x - parentAbs.x, y: nodeAbs.y - parentAbs.y }
+              extent: (targetCandidate?.data?.isLocked !== false) ? 'parent' : undefined,
+              position: { x: nodeAbs.x - parentAbs.x, y: nodeAbs.y - parentAbs.y },
             };
           }
-
-          if (!specEdge && node.parentId && nds.find(n => n.id === node.parentId)?.type === 'spec') {
-            const parentNode = nds.find(n => n.id === node.parentId);
-            if (!parentNode) return node;
-
+          if (!specEdge && node.parentId && nodeMap.get(node.parentId)?.type === 'spec') {
+            if (!nodeMap.get(node.parentId)) return node;
             changed = true;
             const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
-            return {
-              ...node,
-              parentId: undefined,
-              extent: undefined,
-              position: { x: nodeAbs.x, y: nodeAbs.y }
-            };
+            return { ...node, parentId: undefined, extent: undefined, position: nodeAbs };
           }
-        }
-        // LOOSE MODE: Ensure no parent if it was a spec parent
-        else {
-          if (node.parentId && nds.find(n => n.id === node.parentId)?.type === 'spec') {
-            const parentNode = nds.find(n => n.id === node.parentId);
-            if (!parentNode) return node;
-
+        } else {
+          // LOOSE MODE — detach from spec parent so ingredients float freely
+          if (node.parentId && nodeMap.get(node.parentId)?.type === 'spec') {
+            if (!nodeMap.get(node.parentId)) return node;
             changed = true;
             const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
-            return {
-              ...node,
-              parentId: undefined,
-              extent: undefined,
-              position: { x: nodeAbs.x, y: nodeAbs.y }
-            };
+            return { ...node, parentId: undefined, extent: undefined, position: nodeAbs };
           }
         }
 
@@ -517,34 +501,62 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     setRadialPos({ x: event.clientX, y: event.clientY });
   }, []);
 
+  // Resolves whether a flow position falls inside a container and returns
+  // the parentId + position relative to that container if so.
+  const resolveContainer = useCallback(
+    (flowPos: { x: number; y: number }, nds: Node[]) => {
+      const container = HierarchyManager.pickContainingNode(
+        nds.filter(n => n.type === 'container'),
+        flowPos,
+        nds,
+        { width: 300, height: 300 }
+      );
+      if (!container) return { parentId: undefined, resolvedPos: flowPos };
+      const parentAbs = HierarchyManager.getAbsolutePosition(container, nds);
+      return {
+        parentId: container.id,
+        resolvedPos: { x: flowPos.x - parentAbs.x, y: flowPos.y - parentAbs.y },
+      };
+    },
+    []
+  );
+
   const handleCreateIngredient = useCallback((label: string, type: string) => {
     if (!radialPos) return;
     const flowPos = screenToFlowPosition(radialPos);
-    setNodes((nds) => [...nds, {
-      id: getId(),
-      type: 'ingredient',
-      position: flowPos,
-      data: { label, type },
-    } as Node]);
-  }, [radialPos, screenToFlowPosition, setNodes]);
+    setNodes((nds) => {
+      const { parentId, resolvedPos } = resolveContainer(flowPos, nds);
+      return [...nds, {
+        id: getId(), type: 'ingredient',
+        position: resolvedPos,
+        parentId,
+        extent: parentId ? 'parent' : undefined,
+        data: { label, type },
+      } as Node];
+    });
+  }, [radialPos, screenToFlowPosition, setNodes, resolveContainer]);
 
   const handleCreateSpec = useCallback(() => {
     if (!radialPos) return;
     const flowPos = screenToFlowPosition(radialPos);
-    setNodes((nds) => [...nds, {
-      id: getId(),
-      type: 'spec',
-      position: flowPos,
-      data: { label: 'Custom Recipe', method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] },
-    } as Node]);
-  }, [radialPos, screenToFlowPosition, setNodes]);
+    setNodes((nds) => {
+      const { parentId, resolvedPos } = resolveContainer(flowPos, nds);
+      return [...nds, {
+        id: getId(), type: 'spec',
+        position: resolvedPos,
+        parentId,
+        extent: parentId ? 'parent' : undefined,
+        data: { label: 'Custom Recipe', method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] },
+      } as Node];
+    });
+  }, [radialPos, screenToFlowPosition, setNodes, resolveContainer]);
 
   const handleCreateContainer = useCallback(() => {
     if (!radialPos) return;
     const flowPos = screenToFlowPosition(radialPos);
+    // Containers don't nest inside other containers.
     setNodes((nds) => [...nds, {
-      id: getId(),
-      type: 'container',
+      id: getId(), type: 'container',
       position: flowPos,
       style: { width: 300, height: 300 },
       data: { label: 'New Group', type: 'container' },
@@ -557,37 +569,62 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     const config = FORMULA_STRUCTURES[label];
     if (!config) return;
     const specId = getId();
-    const clusterNodes: Node[] = [
-      { id: specId, type: 'spec', position: flowPos, data: { label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] } }
-    ];
-    const clusterEdges: Edge[] = [];
-    config.ingredients.forEach((ing, idx) => {
-      const ingId = getId();
-      clusterNodes.push({ id: ingId, type: 'ingredient', position: { x: -300, y: (idx * 100) - ((config.ingredients.length * 100) / 2) + 100 }, parentId: specId, extent: undefined, data: { label: ing.label, type: ing.type } });
-      clusterEdges.push({ id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: true });
+    setNodes((nds) => {
+      const { parentId, resolvedPos } = resolveContainer(flowPos, nds);
+      const clusterNodes: Node[] = [
+        { id: specId, type: 'spec', position: resolvedPos, parentId, extent: parentId ? 'parent' : undefined,
+          data: { label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] } }
+      ];
+      config.ingredients.forEach((ing, idx) => {
+        const ingId = getId();
+        clusterNodes.push({
+          id: ingId, type: 'ingredient',
+          position: { x: -300, y: (idx * 100) - ((config.ingredients.length * 100) / 2) + 100 },
+          parentId: specId, extent: 'parent',
+          data: { label: ing.label, type: ing.type },
+        });
+      });
+      setEdges((eds) => [
+        ...eds,
+        ...config.ingredients.map((ing, idx) => {
+          const ingId = clusterNodes[idx + 1].id;
+          return { id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: true };
+        }),
+      ]);
+      return [...nds, ...clusterNodes];
     });
-    setNodes((nds) => [...nds, ...clusterNodes]);
-    setEdges((eds) => [...eds, ...clusterEdges]);
-  }, [radialPos, screenToFlowPosition, setNodes, setEdges]);
+  }, [radialPos, screenToFlowPosition, setNodes, setEdges, resolveContainer]);
 
   const handleExpandRecipe = useCallback((recipe: Cocktail) => {
     if (!radialPos) return;
     const flowPos = screenToFlowPosition(radialPos);
     const specId = getId();
-    const clusterNodes: Node[] = [
-      { id: specId, type: 'spec', position: flowPos, data: { label: recipe.name, method: recipe.method, glassware: recipe.glass, isMatched: true, isCustomOverride: false, ingredientsList: [] } }
-    ];
-    const clusterEdges: Edge[] = [];
-    if (recipe.standardIngredients) {
-      recipe.standardIngredients.forEach((ing, idx) => {
+    setNodes((nds) => {
+      const { parentId, resolvedPos } = resolveContainer(flowPos, nds);
+      const clusterNodes: Node[] = [
+        { id: specId, type: 'spec', position: resolvedPos, parentId, extent: parentId ? 'parent' : undefined,
+          data: { label: recipe.name, method: recipe.method, glassware: recipe.glass, isMatched: true, isCustomOverride: false, ingredientsList: [] } }
+      ];
+      const ings = recipe.standardIngredients ?? [];
+      ings.forEach((ing, idx) => {
         const ingId = getId();
-        clusterNodes.push({ id: ingId, type: 'ingredient', position: { x: -300, y: (idx * 100) - ((recipe.standardIngredients!.length * 100) / 2) + 100 }, parentId: specId, extent: undefined, data: { label: ing.label, type: ing.type } });
-        clusterEdges.push({ id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: false });
+        clusterNodes.push({
+          id: ingId, type: 'ingredient',
+          position: { x: -300, y: (idx * 100) - ((ings.length * 100) / 2) + 100 },
+          parentId: specId, extent: 'parent',
+          data: { label: ing.label, type: ing.type },
+        });
       });
-    }
-    setNodes((nds) => [...nds, ...clusterNodes]);
-    setEdges((eds) => [...eds, ...clusterEdges]);
-  }, [radialPos, screenToFlowPosition, setNodes, setEdges]);
+      setEdges((eds) => [
+        ...eds,
+        ...ings.map((ing, idx) => {
+          const ingId = clusterNodes[idx + 1].id;
+          return { id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: false };
+        }),
+      ]);
+      return [...nds, ...clusterNodes];
+    });
+  }, [radialPos, screenToFlowPosition, setNodes, setEdges, resolveContainer]);
 
   const handleExportPdf = useCallback(async () => {
     const flowElement = reactFlowWrapper.current?.querySelector('.react-flow') as HTMLElement | null;
@@ -630,7 +667,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   return (
     <div className="canvas-container" ref={reactFlowWrapper}>
       <ReactFlow
-        nodes={sortNodesByHierarchy(nodes)}
+        nodes={sortedNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
