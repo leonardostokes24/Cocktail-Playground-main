@@ -16,6 +16,17 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { ZoomIn, ZoomOut, Maximize, Map as MapIcon, LogOut, User, Save, FolderOpen } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import IngredientNode from './components/IngredientNode';
 import SpecNode from './components/SpecNode';
 import ContainerNode from './components/ContainerNode';
@@ -56,7 +67,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
-  const overflowRef = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [showMiniMap, setShowMiniMap] = useState(true);
@@ -165,7 +175,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
   // --- Radial Wheel ---
   const [radialPos, setRadialPos] = useState<{ x: number; y: number } | null>(null);
-  const [showOverflow, setShowOverflow] = useState(false);
 
   // --- Auto-Matcher & Recipe List Sync ---
   useEffect(() => {
@@ -365,18 +374,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       return changed ? nextNodes : nds;
     });
   }, [edges, setNodes, lockStatesHash]);
-
-  // Close overflow menu when clicking outside
-  useEffect(() => {
-    if (!showOverflow) return;
-    const handler = (e: MouseEvent) => {
-      if (overflowRef.current && !overflowRef.current.contains(e.target as HTMLElement)) {
-        setShowOverflow(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showOverflow]);
 
   // Long-press to open radial wheel on touch devices
   const onCanvasTouchStart = useCallback((e: React.TouchEvent) => {
@@ -737,26 +734,28 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       {/* Floating Canvas Dock */}
       <div className="canvas-dock">
         <div className="dock-group">
-          <button onClick={() => zoomOut()} className="dock-btn" title="Zoom Out"><ZoomOut size={16} /></button>
+          <Button variant="ghost" size="icon-sm" onClick={() => zoomOut()} title="Zoom Out"><ZoomOut size={15} /></Button>
           <div className="dock-label">{zoomLevel}%</div>
-          <button onClick={() => zoomIn()} className="dock-btn" title="Zoom In"><ZoomIn size={16} /></button>
+          <Button variant="ghost" size="icon-sm" onClick={() => zoomIn()} title="Zoom In"><ZoomIn size={15} /></Button>
         </div>
 
-        <div className="dock-divider" />
+        <Separator orientation="vertical" className="h-5 mx-1 bg-border/40" />
 
-        <button onClick={() => fitView({ padding: 0.2, duration: 800 })} className="dock-btn" title="Fit to View">
-          <Maximize size={16} />
-        </button>
+        <Button variant="ghost" size="icon-sm" onClick={() => fitView({ padding: 0.2, duration: 800 })} title="Fit to View">
+          <Maximize size={15} />
+        </Button>
 
-        <div className="dock-divider" />
+        <Separator orientation="vertical" className="h-5 mx-1 bg-border/40" />
 
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => setShowMiniMap(!showMiniMap)}
-          className={`dock-btn ${showMiniMap ? 'active' : ''}`}
           title="Toggle Minimap"
+          className={showMiniMap ? 'text-primary' : ''}
         >
-          <MapIcon size={16} />
-        </button>
+          <MapIcon size={15} />
+        </Button>
       </div>
 
       <div className="canvas-header">
@@ -764,7 +763,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         <div className="header-brand">
           <div className="header-logo">🍹</div>
           <span className="header-title desktop-only">Cocktail Playground</span>
-          <span className="header-count">{nodes.length} nodes</span>
+          <Badge variant="secondary" className="text-xs font-semibold tabular-nums">{nodes.length} nodes</Badge>
         </div>
 
         {/* Actions */}
@@ -773,78 +772,59 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
           <div className="header-secondary">
             {!user ? (
               <>
-                <button className="header-btn" onClick={onLoginClick}>
+                <Button variant="outline" size="sm" onClick={onLoginClick}>
                   <User size={14} /> Sign In
-                </button>
-                <button className="header-btn" onClick={onDemoLogin} style={{ border: '1px dashed #10b981', color: '#10b981' }}>
+                </Button>
+                <Button variant="outline" size="sm" onClick={onDemoLogin} className="border-dashed border-emerald-500 text-emerald-400 hover:bg-emerald-950 hover:text-emerald-300">
                   🚀 Demo
-                </button>
+                </Button>
               </>
             ) : (
               <>
-                <button className="header-btn" onClick={() => setGalleryOpen(true)}>
+                <Button variant="outline" size="sm" onClick={() => setGalleryOpen(true)}>
                   <FolderOpen size={14} /> Gallery
-                </button>
-                <button
-                  className="header-btn"
-                  onClick={() => {
-                    const name = prompt('Enter canvas name:');
-                    if (name) { setCanvasName(name); saveCanvas(); }
-                  }}
-                >
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => {
+                  const name = prompt('Enter canvas name:');
+                  if (name) { setCanvasName(name); saveCanvas(); }
+                }}>
                   <Save size={14} /> Save
-                </button>
-                <button className="header-btn" onClick={onLogoutClick}>
+                </Button>
+                <Button variant="outline" size="sm" onClick={onLogoutClick}>
                   <LogOut size={14} /> Sign Out
-                </button>
+                </Button>
               </>
             )}
           </div>
 
-          {/* Mobile overflow ⋯ */}
-          <div className="mobile-overflow-wrapper" ref={overflowRef}>
-            <button
-              className="header-btn mobile-overflow-btn"
-              onClick={() => setShowOverflow(o => !o)}
-              title="More options"
-            >
-              ⋯
-            </button>
-            {showOverflow && (
-              <div className="overflow-menu">
-                {!user ? (
-                  <>
-                    <button className="overflow-item" onClick={() => { onLoginClick(); setShowOverflow(false); }}>
-                      👤 Sign In
-                    </button>
-                    <button className="overflow-item" onClick={() => { onDemoLogin(); setShowOverflow(false); }}>
-                      🚀 Demo Mode
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button className="overflow-item" onClick={() => { setGalleryOpen(true); setShowOverflow(false); }}>
-                      📁 Gallery
-                    </button>
-                    <button className="overflow-item" onClick={() => {
-                      const name = prompt('Enter canvas name:');
-                      if (name) { setCanvasName(name); saveCanvas(); }
-                      setShowOverflow(false);
-                    }}>
-                      💾 Save
-                    </button>
-                    <button className="overflow-item" onClick={() => { onLogoutClick(); setShowOverflow(false); }}>
-                      ↩ Sign Out
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          {/* Mobile overflow — shadcn DropdownMenu handles open/close state */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="mobile-overflow-btn">⋯</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              {!user ? (
+                <>
+                  <DropdownMenuItem onClick={onLoginClick}><User size={14} /> Sign In</DropdownMenuItem>
+                  <DropdownMenuItem onClick={onDemoLogin}>🚀 Demo Mode</DropdownMenuItem>
+                </>
+              ) : (
+                <>
+                  <DropdownMenuItem onClick={() => setGalleryOpen(true)}><FolderOpen size={14} /> Gallery</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => {
+                    const name = prompt('Enter canvas name:');
+                    if (name) { setCanvasName(name); saveCanvas(); }
+                  }}><Save size={14} /> Save</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={onLogoutClick}><LogOut size={14} /> Sign Out</DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <button className="header-btn primary" onClick={() => setExportModalOpen(true)} disabled={isExporting}>
+          <Button size="sm" onClick={() => setExportModalOpen(true)} disabled={isExporting}>
             {isExporting ? 'Exporting...' : 'Export Spec'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -878,231 +858,140 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         </div>
       )}
 
-      {exportModalOpen && (
-        <div
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(2, 6, 23, 0.7)', zIndex: 2100,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backdropFilter: 'blur(4px)'
-          }}
-        >
-          <div
-            style={{
-              background: '#1e293b', padding: '24px', borderRadius: '16px',
-              width: '420px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-              border: '1px solid #334155',
-            }}
-          >
-            <h3 style={{ marginTop: 0, borderBottom: '1px solid #334155', paddingBottom: '10px', color: 'white' }}>
-              Export Canvas to PDF
-            </h3>
-            <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '18px' }}>
-              Choose your layout and whether to export the current viewport or fit all nodes.
-            </p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1' }}>
-                Size
-                <select value={exportPaper} onChange={(e) => setExportPaper(e.target.value as PaperSize)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
-                  <option value="a4">A4</option>
-                  <option value="letter">Letter</option>
-                </select>
-              </label>
-
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1' }}>
-                Orientation
-                <select value={exportOrientation} onChange={(e) => setExportOrientation(e.target.value as Orientation)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
-                  <option value="landscape">Landscape</option>
-                  <option value="portrait">Portrait</option>
-                </select>
-              </label>
-            </div>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1', marginBottom: '24px' }}>
-              Content
-              <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
-                <option value="allNodes">All nodes (fit to canvas)</option>
-                <option value="viewport">Current viewport</option>
+      <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Export Canvas to PDF</DialogTitle>
+            <DialogDescription>Choose layout and whether to export the current viewport or fit all nodes.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+              Size
+              <select value={exportPaper} onChange={(e) => setExportPaper(e.target.value as PaperSize)}
+                className="rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground">
+                <option value="a4">A4</option>
+                <option value="letter">Letter</option>
               </select>
             </label>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button
-                onClick={() => setExportModalOpen(false)}
-                style={{ padding: '12px 20px', borderRadius: '8px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExportPdf}
-                style={{ padding: '12px 24px', borderRadius: '8px', border: 'none', background: '#059669', color: 'white', cursor: 'pointer', fontWeight: 700, boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)' }}
-              >
-                Export PDF
-              </button>
-            </div>
+            <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+              Orientation
+              <select value={exportOrientation} onChange={(e) => setExportOrientation(e.target.value as Orientation)}
+                className="rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground">
+                <option value="landscape">Landscape</option>
+                <option value="portrait">Portrait</option>
+              </select>
+            </label>
           </div>
-        </div>
-      )}
+          <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            Content
+            <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)}
+              className="rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground">
+              <option value="allNodes">All nodes (fit to canvas)</option>
+              <option value="viewport">Current viewport</option>
+            </select>
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleExportPdf}>Export PDF</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {galleryOpen && (
-        <div
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(2, 6, 23, 0.8)', zIndex: 2200,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backdropFilter: 'blur(8px)'
-          }}
-        >
-          <div
-            style={{
-              background: '#1e293b', padding: '32px', borderRadius: '24px',
-              width: '500px', maxHeight: '80vh', overflowY: 'auto',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-              border: '1px solid #334155', color: 'white'
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', fontWeight: 800 }}>
-              Canvas Gallery
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {savedCanvases.length === 0 ? (
-                <p style={{ color: '#64748b', textAlign: 'center', padding: '20px' }}>No saved canvases found.</p>
-              ) : (
-                savedCanvases.map(canvas => (
-                  <div
+      <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Canvas Gallery</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] pr-2">
+            {savedCanvases.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No saved canvases found.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {savedCanvases.map(canvas => (
+                  <button
                     key={canvas.id}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '16px', background: '#0f172a', borderRadius: '12px',
-                      border: '1px solid #334155', cursor: 'pointer',
-                      transition: 'all 0.2s'
-                    }}
                     onClick={() => loadCanvas(canvas)}
+                    className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
                   >
-                    <span style={{ fontWeight: 600 }}>{canvas.name}</span>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>{new Date(canvas.created_at).toLocaleDateString()}</span>
-                  </div>
-                ))
-              )}
-            </div>
-            <button
-              onClick={() => setGalleryOpen(false)}
-              style={{
-                marginTop: '24px', width: '100%', padding: '12px', borderRadius: '12px',
-                border: '1px solid #334155', background: 'transparent', color: 'white',
-                cursor: 'pointer', fontWeight: 600
-              }}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+                    <span className="font-semibold text-sm">{canvas.name}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(canvas.created_at).toLocaleDateString()}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGalleryOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {modalConfig && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(2, 6, 23, 0.7)', zIndex: 1000,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(4px)'
-        }}>
-          <div style={{
-            background: '#1e293b', padding: '24px', borderRadius: '16px',
-            width: '380px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-            border: '1px solid #334155',
-            animation: 'fadeIn 0.2s ease-out'
-          }}>
-
-            {(modalConfig.type === 'amount' || modalConfig.type === 'edit-edge') && (
-              <>
-                <h3 style={{ marginTop: 0, borderBottom: '1px solid #334155', paddingBottom: '10px', color: 'white' }}>
-                  {modalConfig.type === 'amount' ? 'Ingredient Amount' : 'Edit Amount'}
-                </h3>
-                <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px' }}>
+      <Dialog open={modalConfig !== null} onOpenChange={(open) => { if (!open) setModalConfig(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          {modalConfig && (modalConfig.type === 'amount' || modalConfig.type === 'edit-edge') && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{modalConfig.type === 'amount' ? 'Ingredient Amount' : 'Edit Amount'}</DialogTitle>
+                <DialogDescription>
                   {modalConfig.type === 'amount'
-                    ? <span>Specify the volume for <b style={{ color: '#e2e8f0' }}>{modalConfig.sourceNode?.data.label}</b>.</span>
-                    : "Update the measurement for this connection."
-                  }
-                </p>
-                <input
+                    ? <>Specify the volume for <strong className="text-foreground">{modalConfig.sourceNode?.data.label as string}</strong>.</>
+                    : 'Update the measurement for this connection.'}
+                </DialogDescription>
+              </DialogHeader>
+              <Input
+                autoFocus
+                value={amountInput}
+                onChange={(e) => setAmountInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSaveConnection()}
+                placeholder="e.g. 2 oz, 3 dashes"
+              />
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setModalConfig(null)}>Cancel</Button>
+                <Button onClick={handleSaveConnection}>{modalConfig.type === 'amount' ? 'Connect' : 'Update'}</Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {modalConfig?.type === 'twist' && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Branch Cocktail</DialogTitle>
+              </DialogHeader>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-wider text-primary">🧬 Inheriting Formula</p>
+                <ul className="space-y-1 text-sm text-foreground/80 list-disc list-inside">
+                  {inheritedList.length > 0
+                    ? inheritedList.map((i, idx) => (
+                        <li key={idx}><span className="font-bold text-primary">{i.amount}</span> {i.node.data.label as string}</li>
+                      ))
+                    : <li className="italic text-muted-foreground">No ingredients in parent spec.</li>}
+                </ul>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Twist Logic</label>
+                <Input
                   autoFocus
-                  type="text"
-                  value={amountInput}
-                  onChange={(e) => setAmountInput(e.target.value)}
+                  value={twistLabel}
+                  placeholder="e.g. Fat-washed spirit, Subbed agave"
+                  onChange={(e) => setTwistLabel(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveConnection()}
-                  placeholder="e.g. 2 oz, 3 dashes"
-                  style={{ width: '94%', padding: '12px', marginBottom: '24px', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: 'white', fontSize: '16px', outline: 'none' }}
                 />
-              </>
-            )}
-
-            {modalConfig.type === 'twist' && (
-              <>
-                <h3 style={{ marginTop: 0, borderBottom: '1px solid #334155', paddingBottom: '10px', color: 'white' }}>Branch Cocktail</h3>
-
-                <div style={{ marginBottom: '16px', background: '#0f172a', padding: '16px', borderRadius: '12px', border: '1px solid #334155' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.05em' }}>🧬 Inheriting Formula:</span>
-                  <ul style={{ margin: '12px 0 0 0', paddingLeft: '20px', fontSize: '13px', color: '#cbd5e1' }}>
-                    {inheritedList.length > 0
-                      ? inheritedList.map((i, idx) => <li key={idx} style={{ marginBottom: '4px' }}><b style={{ color: '#10b981' }}>{i.amount}</b> {i.node.data.label}</li>)
-                      : <li style={{ color: '#475569', fontStyle: 'italic' }}>No ingredients in parent spec.</li>
-                    }
-                  </ul>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Add Variation Ingredient</label>
+                <div className="flex gap-2">
+                  <Input className="flex-[2]" value={newIngName} placeholder="e.g. Chili Oil" onChange={(e) => setNewIngName(e.target.value)} />
+                  <Input className="flex-1" value={newIngAmount} placeholder="Amt" onChange={(e) => setNewIngAmount(e.target.value)} />
                 </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Twist Logic (Edge Label):</label>
-                  <input
-                    autoFocus
-                    type="text"
-                    value={twistLabel}
-                    placeholder="e.g. Fat-washed spirit, Subbed agave"
-                    onChange={(e) => setTwistLabel(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSaveConnection()}
-                    style={{ width: '94%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: 'white', outline: 'none' }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '24px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Add Variation Ingredient:</label>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                    <input
-                      type="text"
-                      value={newIngName}
-                      placeholder="e.g. Chili Oil"
-                      onChange={(e) => setNewIngName(e.target.value)}
-                      style={{ flex: 2, padding: '12px', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: 'white', outline: 'none' }}
-                    />
-                    <input
-                      type="text"
-                      value={newIngAmount}
-                      placeholder="Amt"
-                      onChange={(e) => setNewIngAmount(e.target.value)}
-                      style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: 'white', outline: 'none' }}
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button
-                onClick={() => setModalConfig(null)}
-                style={{ padding: '12px 20px', borderRadius: '8px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveConnection}
-                style={{ padding: '12px 24px', borderRadius: '8px', border: 'none', background: '#059669', color: 'white', cursor: 'pointer', fontWeight: 700, boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)' }}
-              >
-                {modalConfig.type === 'amount' ? 'Connect' : modalConfig.type === 'edit-edge' ? 'Update' : 'Branch Spec'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setModalConfig(null)}>Cancel</Button>
+                <Button onClick={handleSaveConnection}>Branch Spec</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Radial Wheel */}
       {radialPos && (

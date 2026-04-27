@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
 import { priceService } from '../services/priceService';
 import { Globe } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 export default function IngredientNode({ id, data, selected }: any) {
   const { setNodes } = useReactFlow();
@@ -90,67 +92,41 @@ export default function IngredientNode({ id, data, selected }: any) {
           top: '-10px',
           right: '-6px',
           display: 'flex',
-          gap: '4px',
+          gap: '3px',
           zIndex: 10,
           opacity: isHovered ? 1 : 0,
           transition: 'opacity 0.15s',
           pointerEvents: isHovered ? 'all' : 'none',
         }}
       >
-        <button
+        <Button
+          variant="secondary"
+          size="icon-xs"
           onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
           title="Edit ingredient"
-          style={{
-            background: '#334155',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '8px',
-            color: 'white',
-            width: '20px',
-            height: '20px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-          }}
+          className="rounded-full shadow-md"
         >
           ✏️
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="destructive"
+          size="icon-xs"
           onClick={(e) => { e.stopPropagation(); deleteNode(); }}
           title="Delete ingredient"
-          style={{
-            background: '#f87171',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '10px',
-            color: 'white',
-            width: '20px',
-            height: '20px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-          }}
+          className="rounded-full shadow-md"
         >
           ✕
-        </button>
+        </Button>
       </div>
 
       {/* Type label */}
-      <div style={{
-        fontSize: '9px',
-        color,
-        textTransform: 'uppercase',
-        fontWeight: 800,
-        letterSpacing: '0.06em',
-        marginBottom: '3px',
-        opacity: 0.85,
-      }}>
+      <Badge
+        variant="outline"
+        className="mb-1.5 text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0"
+        style={{ color, borderColor: color + '60' }}
+      >
         {data.type}
-      </div>
+      </Badge>
 
       {/* Name */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

@@ -4,6 +4,8 @@ import { supabase } from '../services/supabaseClient';
 import { Save } from 'lucide-react';
 import { parseAmount } from '../utils/pricing';
 import { HierarchyManager } from '../utils/hierarchy';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 export default function SpecNode({ id, data, selected }: any) {
   const { setNodes, getNodes, getEdges } = useReactFlow();
@@ -143,104 +145,47 @@ export default function SpecNode({ id, data, selected }: any) {
       }}
     >
       {/* Action Buttons */}
-      <div className="no-export" style={{
-        position: 'absolute',
-        top: '-12px',
-        right: '-12px',
-        display: 'flex',
-        gap: '6px',
-        opacity: 1,
-        pointerEvents: 'all',
-        zIndex: 10
-      }}>
-        <button 
+      <div className="no-export" style={{ position: 'absolute', top: '-14px', right: '-10px', display: 'flex', gap: '5px', zIndex: 10 }}>
+        <Button
+          size="icon-xs"
+          variant={isLockedNode ? 'default' : 'secondary'}
           onClick={toggleLock}
-          title={isLockedNode ? "Unlock Ingredients" : "Lock Ingredients"}
-          style={{ 
-            background: isLockedNode ? '#10b981' : '#334155', 
-            border: 'none', 
-            cursor: 'pointer', 
-            fontSize: '12px', 
-            color: 'white',
-            width: '28px',
-            height: '28px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            transition: 'all 0.2s'
-          }}
+          title={isLockedNode ? 'Unlock Ingredients' : 'Lock Ingredients'}
+          className="rounded-full shadow-md"
         >
           {isLockedNode ? '🔒' : '🔓'}
-        </button>
-        
-        <button 
+        </Button>
+
+        <Button
+          size="icon-xs"
+          variant="default"
           onClick={saveToLibrary}
           title="Save to Library"
-          style={{ 
-            background: '#059669', 
-            border: 'none', 
-            cursor: 'pointer', 
-            fontSize: '12px', 
-            color: 'white',
-            width: '28px',
-            height: '28px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            transition: 'all 0.2s',
-            opacity: isSaving ? 0.5 : 1
-          }}
+          className="rounded-full shadow-md"
+          disabled={isSaving}
         >
-          {isSaving ? '...' : <Save size={12} />}
-        </button>
+          {isSaving ? '…' : <Save size={11} />}
+        </Button>
 
-        <button 
+        <Button
+          size="icon-xs"
+          variant="secondary"
           onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
           title="Edit name"
-          style={{ 
-            background: '#334155', 
-            border: 'none', 
-            cursor: 'pointer', 
-            fontSize: '12px', 
-            color: 'white',
-            width: '28px',
-            height: '28px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            transition: 'all 0.2s'
-          }}
+          className="rounded-full shadow-md"
         >
           ✏️
-        </button>
-        
-        <button 
+        </Button>
+
+        <Button
+          size="icon-xs"
+          variant="destructive"
           onClick={(e) => { e.stopPropagation(); deleteNode(); }}
           title="Delete specification"
-          style={{ 
-            background: '#f87171', 
-            border: 'none', 
-            cursor: 'pointer', 
-            fontSize: '12px', 
-            color: 'white',
-            width: '28px',
-            height: '28px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            transition: 'all 0.2s'
-          }}
+          className="rounded-full shadow-md"
         >
           ✕
-        </button>
+        </Button>
       </div>
 // ... rest of the component
 
@@ -249,8 +194,10 @@ export default function SpecNode({ id, data, selected }: any) {
       
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
         <div style={{ flexGrow: 1 }}>
-          {isMatched && <div style={{ fontSize: '10px', color: '#34d399', textTransform: 'uppercase', marginBottom: '2px', fontWeight: 800, letterSpacing: '0.05em' }}>✨ Branch Match</div>}
-          {data.isCustomOverride && <div style={{ fontSize: '10px', color: '#fbbf24', textTransform: 'uppercase', marginBottom: '2px', fontWeight: 800, letterSpacing: '0.05em' }}>🛠️ Custom Spec</div>}
+          <div className="flex gap-1.5 mb-1">
+            {isMatched && <Badge className="text-[9px] px-1.5 py-0 bg-emerald-900/60 text-emerald-300 border-emerald-700/50 font-extrabold uppercase tracking-wider">✨ Match</Badge>}
+            {data.isCustomOverride && <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-amber-400 border-amber-600/50 font-extrabold uppercase tracking-wider">🛠️ Custom</Badge>}
+          </div>
           
           {isEditing ? (
              <input 
@@ -280,26 +227,15 @@ export default function SpecNode({ id, data, selected }: any) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button 
-            onClick={toggleOverride}
-            title={data.isCustomOverride ? "Re-enable Auto-Matcher" : "Make Custom Spec"}
-            style={{ 
-              background: data.isCustomOverride ? '#1e293b' : 'transparent',
-              border: '1px solid #334155',
-              padding: '4px',
-              borderRadius: '6px',
-              cursor: 'pointer', 
-              fontSize: '12px', 
-              color: '#64748b',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            {data.isCustomOverride ? '🪄 Enable Matcher' : '🛠️ Override'}
-          </button>
-        </div>
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={toggleOverride}
+          title={data.isCustomOverride ? 'Re-enable Auto-Matcher' : 'Make Custom Spec'}
+          className="text-muted-foreground text-[11px] h-6 px-2"
+        >
+          {data.isCustomOverride ? '🪄 Matcher' : '🛠️ Override'}
+        </Button>
       </div>
 
        <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '12px', marginTop: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
