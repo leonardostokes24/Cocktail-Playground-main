@@ -341,13 +341,11 @@ body {
 
 .canvas-container {
   position: absolute;
-  top: 52px; /* offset below fixed header */
+  top: 52px;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #0f172a;
-  background-image: radial-gradient(rgba(51,65,85,0.7) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-color: #0c1322;
 }
 
 .sidebar-logo {

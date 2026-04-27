@@ -730,7 +730,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         zoomOnScroll={true}
         fitView
       >
-        <Background color="#334155" gap={24} variant="dots" />
+        <Background color="#1e293b" gap={28} size={1.2} variant="dots" />
         {showMiniMap && <MiniMap zoomable pannable nodeColor={(n) => n.type === 'spec' ? '#1e293b' : '#e2e8f0'} />}
       </ReactFlow>
 
