@@ -1,11 +1,45 @@
-import React from 'react';
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Minus } from 'lucide-react';
 import { ibaCocktails } from '../data/cocktailDB';
+import { supabase } from '../services/supabaseClient';
 
-export default function Sidebar({ type, isOpen }: { type: 'builder' | 'library', isOpen: boolean }) {
+export default function Sidebar({ type, isOpen, user, onTabChange }: { type: 'builder' | 'library', isOpen: boolean, user: any, onTabChange: (type: 'builder' | 'library') => void }) {
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [customRecipes, setCustomRecipes] = useState<any[]>([]);
+  const [activeCategory, setActiveCategory] = useState('all');
+
+  const categories = [
+    { id: 'all', label: 'All', color: '#64748b', glow: 'rgba(100, 116, 139, 0.4)', outline: '#94a3b8' },
+    { id: 'spirits', label: 'Spirits', color: '#f59e0b', glow: 'rgba(245, 158, 11, 0.4)', outline: '#fbbf24' },
+    { id: 'liqueurs', label: 'Liqueurs', color: '#fb923c', glow: 'rgba(251, 146, 60, 0.4)', outline: '#fdba74' },
+    { id: 'vermouth', label: 'Vermouth', color: '#dc2626', glow: 'rgba(220, 38, 38, 0.4)', outline: '#ef4444' },
+    { id: 'amari', label: 'Amari', color: '#10b981', glow: 'rgba(16, 185, 129, 0.4)', outline: '#34d399' },
+    { id: 'citrus', label: 'Citrus', color: '#facc15', glow: 'rgba(250, 204, 21, 0.4)', outline: '#fde047' },
+    { id: 'sweeteners', label: 'Sweet', color: '#fbbf24', glow: 'rgba(251, 191, 36, 0.4)', outline: '#fcd34d' },
+    { id: 'bitters', label: 'Bitters', color: '#92400e', glow: 'rgba(146, 64, 14, 0.4)', outline: '#b45309' },
+    { id: 'formulas', label: 'Formulas', color: '#3b82f6', glow: 'rgba(59, 130, 246, 0.4)', outline: '#60a5fa' },
+  ];
+
+  useEffect(() => {
+    if (!user) {
+      setCustomRecipes([]);
+      return;
+    }
+
+    const fetchCustomRecipes = async () => {
+      const { data, error } = await supabase
+        .from('cocktails')
+        .select('*')
+        .eq('user_id', user.id);
+      
+      if (!error && data) {
+        setCustomRecipes(data);
+      }
+    };
+
+    fetchCustomRecipes();
+  }, [user]);
 
   const toggleSection = (section: string) => {
     setCollapsed(prev => ({ ...prev, [section]: !prev[section] }));
@@ -21,6 +55,7 @@ export default function Sidebar({ type, isOpen }: { type: 'builder' | 'library',
   };
 
   const Section = ({ title, id, children }: { title: string, id: string, children: React.ReactNode }) => {
+    if (type === 'builder' && activeCategory !== 'all' && activeCategory !== id) return null;
     const isCollapsed = collapsed[id];
     return (
       <section style={{ marginBottom: '12px' }}>
@@ -195,36 +230,126 @@ export default function Sidebar({ type, isOpen }: { type: 'builder' | 'library',
           <section>
             <h3 className="section-title">Full Recipe Nodes</h3>
             <div className="flex flex-col gap-2">
-              {filteredRecipes.map((recipe, idx) => (
-                <div 
-                  key={idx} 
-                  className="dnd-node" 
-                  style={{ background: '#052c21', border: '1px solid #064e3b' }} 
-                  draggable 
-                  onDragStart={(e) => onDragStart(e, 'recipe', recipe.name, 'spec', { recipe })}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📑 <span>{recipe.name}</span></span>
-                </div>
-              ))}
-              {filteredRecipes.length === 0 && (
-                <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', marginTop: '20px' }}>No matches found</p>
-              )}
+          {ibaCocktails
+            .filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+            .map((recipe, idx) => (
+              <div 
+                key={`iba-${idx}`} 
+                className="dnd-node" 
+                style={{ background: '#052c21', border: '1px solid #064e3b' }} 
+                draggable 
+                onDragStart={(e) => onDragStart(e, 'recipe', recipe.name, 'spec', { recipe })}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📑 <span>{recipe.name}</span></span>
+              </div>
+            ))
+          }
+          {customRecipes
+            .filter(r => r.name.toLowerCase().includes(search.toLowerCase()))
+            .map((recipe, idx) => (
+              <div 
+                key={`custom-${idx}`} 
+                className="dnd-node" 
+                style={{ background: '#1e3a8a', border: '1px solid #1e40af' }} 
+                draggable 
+                onDragStart={(e) => onDragStart(e, 'recipe', recipe.name, 'spec', { recipe })}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⭐ <span>{recipe.name}</span></span>
+              </div>
+            ))
+          }
+          {ibaCocktails.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).length === 0 && customRecipes.filter(r => r.name.toLowerCase().includes(search.toLowerCase())).length === 0 && (
+            <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', marginTop: '20px' }}>No matches found</p>
+          )}
+
             </div>
           </section>
         )}
       </div>
-      <div className="mt-8 p-4 bg-slate-900/50 rounded-xl border border-slate-700">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <p className="text-[11px] text-slate-400 uppercase tracking-tighter font-bold">
-            {type === 'builder' ? 'Lineage Mode: Ready' : 'IBA Archive: Online'}
-          </p>
+       <div className="mt-8 p-4 bg-slate-900/50 rounded-xl border border-slate-700">
+         {type === 'builder' ? (
+           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
+                {categories.map(cat => (
+                  <button 
+                    key={cat.id}
+                    onClick={() => {
+                      setActiveCategory(cat.id);
+                      setCollapsed(prev => ({ ...prev, [cat.id]: false }));
+                    }}
+                    style={{ 
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      border: `1px solid ${cat.color}`,
+                      color: 'white',
+                      background: activeCategory === cat.id 
+                        ? `linear-gradient(180deg, ${cat.outline} 0%, ${cat.color} 100%)` 
+                        : 'transparent',
+                      boxShadow: activeCategory === cat.id 
+                        ? `0 0 10px ${cat.glow}, 0 0 20px ${cat.glow}, inset 0 1px 1px rgba(255,255,255,0.3)` 
+                        : `0 0 5px ${cat.glow}`,
+                      outline: activeCategory === cat.id ? `2px solid ${cat.outline}` : 'none',
+                      textShadow: activeCategory === cat.id ? '0 0 5px rgba(0,0,0,0.5)' : 'none',
+                    }}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+             </div>
+             <p className="text-[10px] text-slate-500 mt-2 leading-relaxed text-center">
+               {activeCategory === 'all' 
+                 ? 'Explore all ingredients' 
+                 : `Showing ${categories.find(c => c.id === activeCategory)?.label} items`}
+             </p>
+           </div>
+         ) : (
+           <div style={{ display: 'flex', gap: '8px' }}>
+             <button 
+               onClick={() => onTabChange('builder')}
+               style={{ 
+                 flex: 1,
+                 padding: '8px',
+                 borderRadius: '8px',
+                 fontSize: '11px',
+                 fontWeight: 'bold',
+                 cursor: 'pointer',
+                 transition: 'all 0.2s',
+                 border: 'none',
+                 color: 'white',
+                 background: '#1e293b',
+                 boxShadow: 'none',
+                 outline: 'none',
+               }}
+             >
+               🛠️ Switch to Builder
+             </button>
+             <button 
+               onClick={() => onTabChange('library')}
+               style={{ 
+                 flex: 1,
+                 padding: '8px',
+                 borderRadius: '8px',
+                 fontSize: '11px',
+                 fontWeight: 'bold',
+                 cursor: 'pointer',
+                 transition: 'all 0.2s',
+                 border: 'none',
+                 color: 'white',
+                 background: '#3b82f6',
+                 boxShadow: '0 0 15px rgba(59, 130, 246, 0.4)',
+                 outline: '2px solid #60a5fa',
+               }}
+             >
+               📚 Library
+             </button>
+           </div>
+         )}
         </div>
-        <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-          {type === 'builder' 
-            ? 'Drag base spirits and modifiers to the canvas to start identifying lineages and classic ratios.'
-            : 'Access the complete IBA official library. Pull cards to the canvas to study their DNA or create variations.'}
-        </p>
-      </div>
-    </aside>
-  );
-}
+      </aside>
+    );
+  }
+

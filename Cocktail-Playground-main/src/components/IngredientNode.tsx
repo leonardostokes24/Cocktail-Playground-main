@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
+import { priceService } from '../services/priceService';
+import { Save, Globe } from 'lucide-react';
 
 export default function IngredientNode({ id, data, selected }: any) {
-  const { updateNodeData, setNodes } = useReactFlow();
+  const { setNodes } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(data.label);
+  const [url, setUrl] = useState('');
+  const [isFetching, setIsFetching] = useState(false);
 
   const typeColors: Record<string, string> = {
     spirit: '#fbbf24',    // amber-400
@@ -16,7 +20,36 @@ export default function IngredientNode({ id, data, selected }: any) {
 
   const handleSave = () => {
     setIsEditing(false);
-    updateNodeData(id, { label: name });
+    setNodes((nds) => 
+      nds.map((node) => 
+        node.id === id ? { ...node, data: { ...node.data, label: name } } : node
+      )
+    );
+  };
+
+  const handleImportPrice = async () => {
+    if (!url) return;
+    setIsFetching(true);
+    try {
+      const result = await priceService.fetchPriceFromUrl(url);
+      if (result) {
+        const confirmed = window.confirm(`Found ${result.currency}${result.price} for ${result.volume}. \nEstimated cost: ${result.currency}${result.pricePerOz.toFixed(2)}/oz. \n\nConfirm import?`);
+        if (confirmed) {
+          setNodes((nds) => 
+            nds.map((node) => 
+              node.id === id ? { ...node, data: { ...node.data, unitPrice: result.pricePerOz, currency: result.currency } } : node
+            )
+          );
+        }
+      } else {
+        alert('Could not automatically determine price from this URL. Please enter it manually if available.');
+      }
+    } catch (error) {
+      alert('Error fetching price from URL.');
+    } finally {
+      setIsFetching(false);
+      setUrl('');
+    }
   };
 
   const deleteNode = () => {
@@ -67,7 +100,6 @@ export default function IngredientNode({ id, data, selected }: any) {
         >
           ✏️
         </button>
-
         <button 
           onClick={(e) => { e.stopPropagation(); deleteNode(); }}
           title="Delete ingredient"
@@ -92,7 +124,7 @@ export default function IngredientNode({ id, data, selected }: any) {
           ✕
         </button>
       </div>
-
+    
       <div style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', marginBottom: '2px' }}>
         {data.type}
       </div>
@@ -116,7 +148,41 @@ export default function IngredientNode({ id, data, selected }: any) {
         )}
       </div>
 
+      {/* Pricing Section */}
+      <div style={{ marginTop: '8px', borderTop: '1px solid rgba(51, 65, 85, 0.5)', paddingTop: '6px' }}>
+        {data.unitPrice ? (
+          <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>
+            {data.currency || '$'}{data.unitPrice.toFixed(2)}/oz
+          </div>
+        ) : (
+          <div style={{ fontSize: '10px', color: '#475569', fontStyle: 'italic' }}>No price set</div>
+        )}
+        
+        <div className="no-export" style={{ display: 'flex', justifyContent: 'center', gap: '4px', marginTop: '4px' }}>
+          <button 
+            onClick={() => {
+              const link = prompt('Enter product URL to fetch price:');
+              if (link) setUrl(link);
+            }}
+            title="Import price from URL"
+            style={{ background: 'transparent', border: '1px solid #334155', color: '#94a3b8', cursor: 'pointer', fontSize: '8px', borderRadius: '4px', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: '2px' }}
+          >
+            <Globe size={8} /> Import
+          </button>
+          {url && (
+            <button 
+              onClick={handleImportPrice}
+              disabled={isFetching}
+              style={{ background: '#059669', border: 'none', color: 'white', cursor: 'pointer', fontSize: '8px', borderRadius: '4px', padding: '2px 4px' }}
+            >
+              {isFetching ? '...' : 'Fetch'}
+            </button>
+          )}
+        </div>
+      </div>
+
       <Handle className="no-export" type="source" position={Position.Right} style={{ background: '#475569', width: '4px', height: '12px', borderRadius: '1px' }} />
     </div>
   );
 }
+

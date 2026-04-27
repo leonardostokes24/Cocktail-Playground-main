@@ -1,7 +1,7 @@
-import { NodeModel } from './portShim/nodeModel'
-import { EdgeModel } from './portShim/edgeModel'
-import { Port } from './portShim/portTypes'
-import { GraphConfig, DEFAULT_GRAPH_CONFIG } from './portShim/graphConfig'
+import { NodeModel } from './nodeModel'
+import { EdgeModel } from './edgeModel'
+import { Port } from './portTypes'
+import { GraphConfig, DEFAULT_GRAPH_CONFIG } from './graphConfig'
 
 export interface PortShimGraph {
   nodes: NodeModel[]

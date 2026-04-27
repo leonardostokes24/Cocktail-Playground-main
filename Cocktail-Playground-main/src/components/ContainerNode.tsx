@@ -1,18 +1,36 @@
 import React, { useState } from 'react';
 import { NodeResizer, useReactFlow } from '@xyflow/react';
+import { HierarchyManager } from '../utils/hierarchy';
 
 export default function ContainerNode({ id, data, selected }: any) {
-  const { updateNodeData, setNodes } = useReactFlow();
+  const { setNodes } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
   const [label, setLabel] = useState(data.label || 'New Group');
 
   const handleSave = () => {
     setIsEditing(false);
-    updateNodeData(id, { label });
+    setNodes((nds) => 
+      nds.map((node) => 
+        node.id === id ? { ...node, data: { ...node.data, label } } : node
+      )
+    );
   };
 
   const deleteNode = () => {
-    setNodes((nds) => nds.filter((n) => n.id !== id));
+    setNodes((nds) => {
+      const remainingNodes = nds.filter((n) => n.id !== id);
+      return remainingNodes.map((node) => {
+        if (node.parentId === id) {
+          return { 
+            ...node, 
+            parentId: undefined, 
+            position: HierarchyManager.getAbsolutePosition(node, nds),
+            extent: undefined 
+          };
+        }
+        return node;
+      });
+    });
   };
 
   return (

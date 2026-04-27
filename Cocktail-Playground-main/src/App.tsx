@@ -15,14 +15,18 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { Menu, BookOpen, ChevronLeft, ChevronRight, Share2, Download, PanelsTopLeft, Library as LibraryIcon, ZoomIn, ZoomOut, Maximize, Map as MapIcon } from 'lucide-react';
+import { Menu, BookOpen, ChevronLeft, ChevronRight, Share2, Download, PanelsTopLeft, Library as LibraryIcon, ZoomIn, ZoomOut, Maximize, Map as MapIcon, LogOut, User, Save, FolderOpen } from 'lucide-react';
 import IngredientNode from './components/IngredientNode';
 import SpecNode from './components/SpecNode';
 import ContainerNode from './components/ContainerNode';
 import CustomEdge from './components/CustomEdge';
 import Sidebar from './components/Sidebar';
+import LoginModal from './components/LoginModal';
 import { findCocktailMatch } from './data/cocktailDB';
 import { exportFlowToPdf, type ExportMode, type Orientation, type PaperSize } from './utils/exportPdf';
+import { supabase } from './services/supabaseClient';
+import { HierarchyManager } from './utils/hierarchy';
+import { sortNodesByHierarchy } from './utils/hierarchySorting';
 
 const nodeTypes = {
   ingredient: IngredientNode,
@@ -40,7 +44,8 @@ const initialEdges: Edge[] = [];
 let idCounter = 0;
 const getId = () => `node_${idCounter++}_${Date.now()}`;
 
-function CocktailCanvas() {
+function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { user: any, onLoginClick: () => void, onLogoutClick: () => void, onDemoLogin: () => void }) {
+
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -53,6 +58,75 @@ function CocktailCanvas() {
   const [exportMode, setExportMode] = useState<ExportMode>('allNodes');
   const [exportPaper, setExportPaper] = useState<PaperSize>('a4');
   const [exportOrientation, setExportOrientation] = useState<Orientation>('landscape');
+
+
+  // --- Canvas Saving & Gallery ---
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [savedCanvases, setSavedCanvases] = useState<any[]>([]);
+  const [canvasName, setCanvasName] = useState("");
+
+  const fetchCanvases = useCallback(async () => {
+    if (!user) return;
+
+    if (user.id === 'demo-user-123') {
+      const local = localStorage.getItem('demo_canvases');
+      setSavedCanvases(local ? JSON.parse(local) : []);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('canvases')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+    if (!error && data) setSavedCanvases(data);
+  }, [user]);
+
+  useEffect(() => {
+    fetchCanvases();
+  }, [fetchCanvases]);
+
+  const saveCanvas = async () => {
+    if (!user || !canvasName) return;
+
+    if (user.id === 'demo-user-123') {
+      const local = localStorage.getItem('demo_canvases');
+      const current = local ? JSON.parse(local) : [];
+      const updated = [...current.filter((c: any) => c.name !== canvasName), {
+        id: Date.now().toString(),
+        name: canvasName,
+        nodes,
+        edges,
+        user_id: user.id,
+        created_at: new Date().toISOString(),
+      }];
+      localStorage.setItem('demo_canvases', JSON.stringify(updated));
+      alert('Canvas saved successfully (Demo Mode)!');
+      setCanvasName("");
+      fetchCanvases();
+      return;
+    }
+
+    const { error } = await supabase.from('canvases').upsert({
+      name: canvasName,
+      nodes,
+      edges,
+      user_id: user.id,
+    });
+    if (error) {
+      alert('Error saving canvas: ' + error.message);
+    } else {
+      alert('Canvas saved successfully!');
+      setCanvasName("");
+      fetchCanvases();
+    }
+  };
+
+  const loadCanvas = (canvas: any) => {
+    setNodes(sortNodesByHierarchy(canvas.nodes));
+    setEdges(canvas.edges);
+    setGalleryOpen(false);
+  };
 
   // Sync zoom level for display
   useEffect(() => {
@@ -97,8 +171,9 @@ function CocktailCanvas() {
   const [wheelConfig, setWheelConfig] = useState<{ 
     x: number; 
     y: number; 
-    sourceId: string; 
-    handleType: string;
+    sourceId?: string; 
+    handleType?: string;
+    dropData?: any;
   } | null>(null);
   const connectionSource = useRef<{ nodeId: string; handleType: string } | null>(null);
 
@@ -189,126 +264,86 @@ function CocktailCanvas() {
     });
   }, [edges, nodes, setNodes]);
 
-  // Helper to calculate absolute position and resolve parenting changes safely
-  const getAbsolutePosition = useCallback((node: Node, allNodes: Node[]) => {
-    let x = node.position.x;
-    let y = node.position.y;
-    let currentParentId = node.parentId;
-    
-    while (currentParentId) {
-      const parent = allNodes.find(n => n.id === currentParentId);
-      if (!parent) break;
-      x += parent.position.x;
-      y += parent.position.y;
-      currentParentId = parent.parentId;
-    }
-    return { x, y };
-  }, []);
-
-  const getNodeBounds = useCallback((node: Node, allNodes: Node[], defaults: { width: number; height: number }) => {
-    const abs = getAbsolutePosition(node, allNodes);
-    const width = node.measured?.width || (typeof node.style?.width === 'number' ? node.style.width : defaults.width);
-    const height = node.measured?.height || (typeof node.style?.height === 'number' ? node.style.height : defaults.height);
-    return {
-      x: abs.x,
-      y: abs.y,
-      width,
-      height,
-      area: width * height
-    };
-  }, [getAbsolutePosition]);
-
-  const pickContainingNode = useCallback((
-    candidates: Node[],
-    point: { x: number; y: number },
-    allNodes: Node[],
-    defaults: { width: number; height: number }
-  ) => {
-    return candidates
-      .map(node => ({ node, bounds: getNodeBounds(node, allNodes, defaults) }))
-      .filter(({ bounds }) => (
-        point.x >= bounds.x &&
-        point.x <= bounds.x + bounds.width &&
-        point.y >= bounds.y &&
-        point.y <= bounds.y + bounds.height
-      ))
-      .sort((a, b) => a.bounds.area - b.bounds.area)[0]?.node ?? null;
-  }, [getNodeBounds]);
-
   const onNodeDragStop = useCallback((_: any, draggedNode: Node) => {
-    if (draggedNode.type === 'container') return;
-
     setNodes((nds) => {
-      const abs = getAbsolutePosition(draggedNode, nds);
-      // #region agent log
-      fetch('http://127.0.0.1:7257/ingest/e7bae5b2-f89b-4d73-a119-54a44956bb7b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8e26a0'},body:JSON.stringify({sessionId:'8e26a0',runId:'run1',hypothesisId:'H1-H2',location:'src/App.tsx:onNodeDragStop:entry',message:'drag stop start',data:{nodeId:draggedNode.id,nodeType:draggedNode.type,parentId:draggedNode.parentId,absX:abs.x,absY:abs.y,posX:draggedNode.position.x,posY:draggedNode.position.y},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+      const abs = HierarchyManager.getAbsolutePosition(draggedNode, nds);
       
-      // 1. Check if dropped over a container
-      const parentContainer = pickContainingNode(
+      // 1. Find the best containing node (Container or Spec)
+      const parentContainer = HierarchyManager.pickContainingNode(
         nds.filter(n => n.type === 'container' && n.id !== draggedNode.id),
         abs,
         nds,
         { width: 300, height: 300 }
       );
 
-      const parentSpecCandidate = pickContainingNode(
+      const parentSpecCandidate = HierarchyManager.pickContainingNode(
         nds.filter(n => n.type === 'spec' && n.id !== draggedNode.id),
         abs,
         nds,
         { width: 240, height: 160 }
       );
 
-      // Only parent to Spec if the Spec is currently in "Lock" mode
+      // A Spec only acts as a parent if it's in "Locked" mode
       const parentSpec = (parentSpecCandidate?.data?.isLocked !== false) ? parentSpecCandidate : null;
-
       const finalParent = parentContainer || parentSpec;
- 
+  
       if (finalParent) {
         if (draggedNode.parentId === finalParent.id) return nds;
- 
+  
+        const parentAbs = HierarchyManager.getAbsolutePosition(finalParent, nds);
+        
+        // Determine if the node should be restricted to the parent's bounds
+        const isContainer = finalParent.type === 'container';
+        const isLockedConnectedSpec = finalParent.type === 'spec' && 
+                                    (finalParent.data?.isLocked !== false) && 
+                                    edges.some(e => e.source === draggedNode.id && e.target === finalParent.id);
+        
+        const shouldRestrict = isContainer || isLockedConnectedSpec;
+
         return nds.map(node => {
           if (node.id === draggedNode.id) {
-            const containerAbs = getAbsolutePosition(finalParent, nds);
             return {
               ...node,
               parentId: finalParent.id,
-              position: { x: abs.x - containerAbs.x, y: abs.y - containerAbs.y },
-              extent: 'parent'
+              position: { x: abs.x - parentAbs.x, y: abs.y - parentAbs.y },
+              extent: shouldRestrict ? 'parent' : undefined
             } as Node;
           }
           return node;
         });
       }
-
-
-      // 2. If dropped outside and was in a container or spec, unparent it
-      if (draggedNode.parentId) {
-         const currentParent = nds.find(n => n.id === draggedNode.parentId);
-         const isLockedSpec = currentParent?.type === 'spec' && (currentParent.data?.isLocked !== false);
-         
-         // If the parent spec is locked, do NOT unparent the ingredient node. This keeps it attached
-         // to the spec even if dragged outside its visual bounds, unless it's dropped over a new parent.
-         if (isLockedSpec) {
-           return nds;
-         }
-
-         return nds.map(node => {
-           if (node.id === draggedNode.id) {
-             return {
-               ...node,
-               parentId: undefined,
-               position: { x: abs.x, y: abs.y },
-               extent: undefined
-             } as Node;
+ 
+       // 2. If dropped outside, handle unparenting
+       if (draggedNode.parentId) {
+           const currentParent = nds.find(n => n.id === draggedNode.parentId);
+           const isLockedSpec = currentParent?.type === 'spec' && (currentParent.data?.isLocked !== false);
+           
+           // Only refuse to unparent if the spec is locked AND the ingredient is connected to it
+           if (isLockedSpec) {
+             const isConnected = edges.some(e => e.source === draggedNode.id && e.target === currentParent?.id);
+             if (isConnected) return nds;
            }
-           return node;
-         });
-      }
+  
+           return nds.map(node => {
 
+            if (node.id === draggedNode.id) {
+              return {
+                ...node,
+                parentId: undefined,
+                position: { x: abs.x, y: abs.y },
+                extent: undefined
+              } as Node;
+            }
+            return node;
+          });
+      }
+ 
       return nds;
     });
-  }, [setNodes, getAbsolutePosition, pickContainingNode]);
+  }, [setNodes]);
+
+
+
 
   // Sync parenting with edges
   useEffect(() => {
@@ -335,14 +370,13 @@ function CocktailCanvas() {
             if (!targetNode) return node;
 
             changed = true;
-            const nodeAbs = getAbsolutePosition(node, nds);
-            const parentAbs = getAbsolutePosition(targetNode, nds);
- 
+            const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
+            const parentAbs = HierarchyManager.getAbsolutePosition(targetNode, nds);
+  
             return {
               ...node,
-
               parentId: specEdge.target,
-              extent: undefined,
+              extent: (targetNodeCandidate?.data?.isLocked !== false) ? 'parent' : undefined,
               position: { x: nodeAbs.x - parentAbs.x, y: nodeAbs.y - parentAbs.y }
             };
           }
@@ -352,7 +386,7 @@ function CocktailCanvas() {
             if (!parentNode) return node;
             
             changed = true;
-            const nodeAbs = getAbsolutePosition(node, nds);
+            const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
             return {
               ...node,
               parentId: undefined,
@@ -368,7 +402,7 @@ function CocktailCanvas() {
             if (!parentNode) return node;
             
             changed = true;
-            const nodeAbs = getAbsolutePosition(node, nds);
+            const nodeAbs = HierarchyManager.getAbsolutePosition(node, nds);
             return {
               ...node,
               parentId: undefined,
@@ -383,7 +417,8 @@ function CocktailCanvas() {
 
       return changed ? nextNodes : nds;
     });
-  }, [edges, setNodes, getAbsolutePosition, lockStatesHash]);
+  }, [edges, setNodes, lockStatesHash]);
+
 
   // --- Handle Connections ---
   const onConnect = useCallback(
@@ -448,7 +483,7 @@ function CocktailCanvas() {
       const newNodesToAdd: Node[] = [];
       const newEdgesToAdd: Edge[] = [];
       const targetNode = modalConfig.targetNode!;
-      const targetAbs = getAbsolutePosition(targetNode, nodes);
+      const targetAbs = HierarchyManager.getAbsolutePosition(targetNode, nodes);
 
       // 1. Lineage Edge (Dashed)
       const lineageEdge: Edge = { 
@@ -520,37 +555,40 @@ function CocktailCanvas() {
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
-  const handleWheelAction = (action: 'branch' | 'blank') => {
+  const handleWheelAction = (action: 'branch' | 'blank' | 'expand' | 'single' | 'node') => {
     if (!wheelConfig) return;
-    const { sourceId, x, y } = wheelConfig;
-    const sourceNode = getNode(sourceId);
-    if (!sourceNode) return;
-
+    const { sourceId, x, y, dropData } = wheelConfig;
     const flowPos = screenToFlowPosition({ x, y });
     const newSpecId = getId();
 
-    if (action === 'blank') {
+    if (action === 'blank' || (action === 'single' && dropData?.nodeType === 'spec')) {
+      const label = dropData?.label || 'Custom Recipe';
       const newSpecNode: Node = {
         id: newSpecId,
         type: 'spec',
         position: flowPos,
-        data: { label: 'Custom Recipe', method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] }
+        data: { label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] }
       };
       
-      const newEdge: Edge = {
-        id: `edge_${sourceId}_${newSpecId}`,
-        source: sourceId,
-        target: newSpecId,
-        label: sourceNode.type === 'ingredient' ? '1 oz' : 'Twist',
-        animated: true,
-        type: 'custom'
-      };
+      if (sourceId) {
+        const sourceNode = getNode(sourceId);
+        const newEdge: Edge = {
+          id: `edge_${sourceId}_${newSpecId}`,
+          source: sourceId,
+          target: newSpecId,
+          label: sourceNode?.type === 'ingredient' ? '1 oz' : 'Twist',
+          animated: true,
+          type: 'custom'
+        };
+        setEdges((eds) => [...eds, newEdge]);
+      }
 
       setNodes((nds) => [...nds, newSpecNode]);
-      setEdges((eds) => [...eds, newEdge]);
     } 
-    else if (action === 'branch' && sourceNode.type === 'spec') {
-      // Branching logic similar to twist but triggered from wheel
+    else if (action === 'branch' && sourceId) {
+      const sourceNode = getNode(sourceId);
+      if (!sourceNode || sourceNode.type !== 'spec') return;
+      
       const parentIncomingEdges = edges.filter(e => e.target === sourceId);
       const parentIngredients = parentIncomingEdges.map(e => {
         const n = nodes.find(node => node.id === e.source);
@@ -560,11 +598,10 @@ function CocktailCanvas() {
         return null;
       }).filter((item): item is { node: Node; amount: string } => item !== null);
 
-      const targetPos = flowPos;
       const targetSpecNode: Node = {
         id: newSpecId,
         type: 'spec',
-        position: targetPos,
+        position: flowPos,
         data: { ...sourceNode.data, label: `Twist on ${sourceNode.data.label}`, isCustomOverride: true, ingredientsList: [] }
       };
 
@@ -607,10 +644,66 @@ function CocktailCanvas() {
 
       setNodes((nds) => [...nds, targetSpecNode, ...newIngredients]);
       setEdges((eds) => [...eds, ...newEdges]);
-    }
+    } 
+    else if (action === 'expand' && dropData) {
+      // Reuse the expansion logic from onDrop
+      if (dropData.nodeType === 'spec' && dropData.label !== 'Custom Recipe') {
+        const clusterNodes: Node[] = [];
+        const clusterEdges: Edge[] = [];
+        const specId = getId();
+        
+        const structures: Record<string, { ingredients: { label: string; type: string; amount: string }[] }> = {
+          'The Sour': { ingredients: [{ label: 'Base Spirit', type: 'spirit', amount: '2 oz' }, { label: 'Citrus', type: 'citrus', amount: '0.75 oz' }, { label: 'Sweetener', type: 'sweetener', amount: '0.75 oz' }] },
+          'Spirit-Forward': { ingredients: [{ label: 'Base Spirit', type: 'spirit', amount: '2 oz' }, { label: 'Fortified Wine', type: 'modifier', amount: '1 oz' }, { label: 'Aromatic Bitters', type: 'bitters', amount: '2 dashes' }] },
+          'Highball': { ingredients: [{ label: 'Base Spirit', type: 'spirit', amount: '2 oz' }, { label: 'Modifier / Citrus', type: 'citrus', amount: '0.5 oz' }, { label: 'Sparkling Filler', type: 'sweetener', amount: '4 oz' }] },
+          'Negroni Style': { ingredients: [{ label: 'Base Spirit', type: 'spirit', amount: '1 oz' }, { label: 'Bitters / Aperitif', type: 'modifier', amount: '1 oz' }, { label: 'Sweet Vermouth', type: 'modifier', amount: '1 oz' }] },
+        };
 
+        const config = structures[dropData.label];
+        if (config) {
+          clusterNodes.push({ id: specId, type: 'spec', position: flowPos, data: { label: dropData.label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] } });
+          config.ingredients.forEach((ing, idx) => {
+            const ingId = getId();
+            clusterNodes.push({ id: ingId, type: 'ingredient', position: { x: -300, y: (idx * 100) - ((config.ingredients.length * 100) / 2) + 100 }, parentId: specId, extent: undefined, data: { label: ing.label, type: ing.type } });
+            clusterEdges.push({ id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: true });
+          });
+          setNodes((nds) => [...nds, ...clusterNodes]);
+          setEdges((eds) => [...eds, ...clusterEdges]);
+        }
+      } else if (dropData.nodeType === 'recipe') {
+        const clusterNodes: Node[] = [];
+        const clusterEdges: Edge[] = [];
+        const specId = getId();
+        const recipe = dropData.recipe;
+        clusterNodes.push({ id: specId, type: 'spec', position: flowPos, data: { label: recipe.name, method: recipe.method, glassware: recipe.glass, isMatched: true, isCustomOverride: false, ingredientsList: [] } });
+        if (recipe.standardIngredients) {
+          recipe.standardIngredients.forEach((ing: any, idx: number) => {
+            const ingId = getId();
+            clusterNodes.push({ id: ingId, type: 'ingredient', position: { x: -300, y: (idx * 100) - ((recipe.standardIngredients.length * 100) / 2) + 100 }, parentId: specId, extent: undefined, data: { label: ing.label, type: ing.type } });
+            clusterEdges.push({ id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: false });
+          });
+        }
+        setNodes((nds) => [...nds, ...clusterNodes]);
+        setEdges((eds) => [...eds, ...clusterEdges]);
+      }
+    }
+    else if (action === 'node' && dropData) {
+      const intersectContainer = HierarchyManager.pickContainingNode(nodes.filter(n => n.type === 'container'), flowPos, nodes, { width: 300, height: 300 });
+      const newNode: Node = {
+        id: getId(),
+        type: dropData.nodeType,
+        position: intersectContainer ? { x: flowPos.x - intersectContainer.position.x, y: flowPos.y - intersectContainer.position.y } : flowPos,
+        parentId: intersectContainer?.id,
+        extent: intersectContainer ? 'parent' : undefined,
+        data: { label: dropData.label, type: dropData.categoryType, method: dropData.nodeType === 'spec' ? 'Experimenting...' : null, glassware: dropData.nodeType === 'spec' ? 'Unknown' : null, isMatched: false, isCustomOverride: false, ingredientsList: [] },
+      };
+      if (dropData.nodeType === 'container') newNode.style = { width: 300, height: 300 };
+      setNodes((nds) => nds.concat(newNode));
+    }
+    
     setWheelConfig(null);
   };
+
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
@@ -620,191 +713,34 @@ function CocktailCanvas() {
       
       const parsedData = JSON.parse(reactFlowData);
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-
+      
       // --- FEATURE: HOT SWAPPING ---
-      // Check if we dropped an ingredient on an existing ingredient node
-      // We'll use a simple coordinate-based check since we don't have the internal flow event here easily
       const intersectedNode = nodes.find(n => (
         n.type === 'ingredient' && 
         Math.abs(n.position.x - position.x) < 80 && 
         Math.abs(n.position.y - position.y) < 40
       ));
-
+      
       if (intersectedNode && parsedData.nodeType === 'ingredient') {
         setNodes((nds) => nds.map(node => {
           if (node.id === intersectedNode.id) {
-            return {
-              ...node,
-              data: { ...node.data, label: parsedData.label, type: parsedData.categoryType }
-            };
+            return { ...node, data: { ...node.data, label: parsedData.label, type: parsedData.categoryType } };
           }
           return node;
         }));
         return;
       }
 
-      // --- FEATURE: SMART FORMULA CLUSTERS ---
-      if (parsedData.nodeType === 'spec' && parsedData.label !== 'Custom Recipe') {
-        const clusterNodes: Node[] = [];
-        const clusterEdges: Edge[] = [];
-        const specId = getId();
-        
-        // Define common formula structures
-        const structures: Record<string, { ingredients: { label: string; type: string; amount: string }[] }> = {
-          'The Sour': {
-             ingredients: [
-               { label: 'Base Spirit', type: 'spirit', amount: '2 oz' },
-               { label: 'Citrus', type: 'citrus', amount: '0.75 oz' },
-               { label: 'Sweetener', type: 'sweetener', amount: '0.75 oz' }
-             ]
-          },
-          'Spirit-Forward': {
-            ingredients: [
-               { label: 'Base Spirit', type: 'spirit', amount: '2 oz' },
-               { label: 'Fortified Wine', type: 'modifier', amount: '1 oz' },
-               { label: 'Aromatic Bitters', type: 'bitters', amount: '2 dashes' }
-            ]
-          },
-          'Highball': {
-            ingredients: [
-               { label: 'Base Spirit', type: 'spirit', amount: '2 oz' },
-               { label: 'Modifier / Citrus', type: 'citrus', amount: '0.5 oz' },
-               { label: 'Sparkling Filler', type: 'sweetener', amount: '4 oz' }
-            ]
-          },
-          'Negroni Style': {
-            ingredients: [
-               { label: 'Base Spirit', type: 'spirit', amount: '1 oz' },
-               { label: 'Bitters / Aperitif', type: 'modifier', amount: '1 oz' },
-               { label: 'Sweet Vermouth', type: 'modifier', amount: '1 oz' }
-            ]
-          }
-        };
-
-        const config = structures[parsedData.label];
-        
-        if (config) {
-          clusterNodes.push({
-            id: specId,
-            type: 'spec',
-            position,
-            data: { label: parsedData.label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] }
-          });
-
-          config.ingredients.forEach((ing, idx) => {
-            const ingId = getId();
-            const relPosX = -200;
-            const relPosY = (idx * 80) - 80;
-            
-            clusterNodes.push({
-              id: ingId,
-              type: 'ingredient',
-              position: { x: relPosX, y: relPosY },
-              parentId: specId,
-              extent: undefined,
-              data: { label: ing.label, type: ing.type }
-            });
-            clusterEdges.push({
-              id: `edge_${ingId}_${specId}`,
-              source: ingId,
-              target: specId,
-              label: ing.amount,
-              animated: true
-            });
-          });
-
-          setNodes((nds) => [...nds, ...clusterNodes]);
-          setEdges((eds) => [...eds, ...clusterEdges]);
-          return;
-        }
-      }
-
-      // --- FEATURE: FULL RECIPE EXPANSION ---
-      if (parsedData.nodeType === 'recipe') {
-        const clusterNodes: Node[] = [];
-        const clusterEdges: Edge[] = [];
-        const specId = getId();
-        const recipe = parsedData.recipe;
-        
-        clusterNodes.push({
-          id: specId,
-          type: 'spec',
-          position,
-          data: { 
-            label: recipe.name, 
-            method: recipe.method, 
-            glassware: recipe.glass, 
-            isMatched: true, 
-            isCustomOverride: false, 
-            ingredientsList: [] 
-          }
-        });
-
-        if (recipe.standardIngredients) {
-          recipe.standardIngredients.forEach((ing: any, idx: number) => {
-            const ingId = getId();
-            const relPosX = -220;
-            const relPosY = (idx * 85) - ((recipe.standardIngredients.length * 85) / 2) + 40;
-            
-            clusterNodes.push({
-              id: ingId,
-              type: 'ingredient',
-              position: { x: relPosX, y: relPosY },
-              parentId: specId,
-              extent: undefined,
-              data: { label: ing.label, type: ing.type }
-            });
-            clusterEdges.push({
-              id: `edge_${ingId}_${specId}`,
-              source: ingId,
-              target: specId,
-              label: ing.amount,
-              animated: false
-            });
-          });
-        }
-
-        setNodes((nds) => [...nds, ...clusterNodes]);
-        setEdges((eds) => [...eds, ...clusterEdges]);
-        return;
-      }
-
-      // --- DEFAULT: SINGLE NODE DROP ---
-      const intersectContainer = pickContainingNode(
-        nodes.filter(n => n.type === 'container'),
-        position,
-        nodes,
-        { width: 300, height: 300 }
-      );
- 
-      const newNode: Node = {
-        id: getId(),
-        type: parsedData.nodeType,
-        position: intersectContainer 
-          ? { x: position.x - intersectContainer.position.x, y: position.y - intersectContainer.position.y }
-          : position,
-        parentId: intersectContainer?.id,
-        extent: intersectContainer ? 'parent' : undefined,
-        data: { 
-          label: parsedData.label, 
-          type: parsedData.categoryType,
-          method: parsedData.nodeType === 'spec' ? 'Experimenting...' : null,
-          glassware: parsedData.nodeType === 'spec' ? 'Unknown' : null,
-          isMatched: false,
-          isCustomOverride: false,
-          ingredientsList: []
-        },
-      };
-
-      // Spec special initialization
-      if (parsedData.nodeType === 'container') {
-        newNode.style = { width: 300, height: 300 };
-      }
-
-      setNodes((nds) => nds.concat(newNode));
+      // Instead of immediate creation, open the action wheel
+      setWheelConfig({
+        x: event.clientX,
+        y: event.clientY,
+        dropData: parsedData
+      });
     },
-    [screenToFlowPosition, setNodes, nodes, pickContainingNode]
+    [screenToFlowPosition, setNodes, nodes]
   );
+
 
   const handleExportPdf = useCallback(async () => {
     const flowElement = reactFlowWrapper.current?.querySelector('.react-flow') as HTMLElement | null;
@@ -847,7 +783,7 @@ function CocktailCanvas() {
   return (
     <div className="canvas-container" ref={reactFlowWrapper}>
       <ReactFlow
-        nodes={nodes}
+        nodes={sortNodesByHierarchy(nodes)}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -858,6 +794,15 @@ function CocktailCanvas() {
         onDrop={onDrop}
         onDragOver={onDragOver}
         onNodeDragStop={onNodeDragStop}
+        onPaneClick={(event) => {
+          // Only open wheel if clicking the pane (not a node or control)
+          if (event.target === event.currentTarget || (event.target as HTMLElement).classList.contains('react-flow__pane')) {
+            setWheelConfig({
+              x: event.clientX,
+              y: event.clientY,
+            });
+          }
+        }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{ type: 'custom' }}
@@ -898,12 +843,53 @@ function CocktailCanvas() {
           <span className="badge-divider">|</span>
           <span className="badge-text">Nodes: {nodes.length}</span>
         </div>
-        <div className="header-actions">
-           <button className="header-btn desktop-only">Presentation Mode</button>
-           <button className="header-btn primary" onClick={() => setExportModalOpen(true)} disabled={isExporting}>
-            {isExporting ? 'Exporting...' : 'Export Spec'}
-          </button>
-        </div>
+       <div className="header-actions">
+            <button className="header-btn desktop-only">Presentation Mode</button>
+            {!user ? (
+              <>
+                <button className="header-btn" onClick={onLoginClick}>
+                  <User size={16} /> Sign In
+                </button>
+                <button className="header-btn" onClick={onDemoLogin} style={{ border: '1px dashed #10b981', color: '#10b981' }}>
+                  🚀 Demo Mode
+                </button>
+              </>
+            ) : (
+              <>
+                <button 
+                  className="header-btn" 
+                  onClick={onLogoutClick}
+                  title="Sign Out"
+                >
+                  <LogOut size={16} /> Sign Out
+                </button>
+                <button 
+                  className="header-btn" 
+                  onClick={() => setGalleryOpen(true)} 
+                  title="Load Saved Canvas"
+                >
+                  <FolderOpen size={16} /> Gallery
+                </button>
+                <button 
+                  className="header-btn" 
+                  onClick={() => {
+                    const name = prompt('Enter canvas name:');
+                    if (name) {
+                      setCanvasName(name);
+                      saveCanvas();
+                    }
+                  }} 
+                  title="Save Current Canvas"
+                >
+                  <Save size={16} /> Save
+                </button>
+              </>
+            )}
+            <button className="header-btn primary" onClick={() => setExportModalOpen(true)} disabled={isExporting}>
+              {isExporting ? 'Exporting...' : 'Export Spec'}
+            </button>
+          </div>
+
       </div>
 
       {exportMessage && (
@@ -927,72 +913,128 @@ function CocktailCanvas() {
         </div>
       )}
 
-      {exportModalOpen && (
-        <div
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(2, 6, 23, 0.7)', zIndex: 2100,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backdropFilter: 'blur(4px)'
-          }}
-        >
-          <div
-            style={{
-              background: '#1e293b', padding: '24px', borderRadius: '16px',
-              width: '420px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-              border: '1px solid #334155',
-            }}
-          >
-            <h3 style={{ marginTop: 0, borderBottom: '1px solid #334155', paddingBottom: '10px', color: 'white' }}>
-              Export Canvas to PDF
-            </h3>
-            <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '18px' }}>
-              Choose your layout and whether to export the current viewport or fit all nodes.
-            </p>
+       {exportModalOpen && (
+         <div
+           style={{
+             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+             backgroundColor: 'rgba(2, 6, 23, 0.7)', zIndex: 2100,
+             display: 'flex', alignItems: 'center', justifyContent: 'center',
+             backdropFilter: 'blur(4px)'
+           }}
+         >
+           <div
+             style={{
+               background: '#1e293b', padding: '24px', borderRadius: '16px',
+               width: '420px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+               border: '1px solid #334155',
+             }}
+           >
+             <h3 style={{ marginTop: 0, borderBottom: '1px solid #334155', paddingBottom: '10px', color: 'white' }}>
+               Export Canvas to PDF
+             </h3>
+             <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '18px' }}>
+               Choose your layout and whether to export the current viewport or fit all nodes.
+             </p>
+             
+             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+               <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1' }}>
+                 Size
+                 <select value={exportPaper} onChange={(e) => setExportPaper(e.target.value as PaperSize)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
+                   <option value="a4">A4</option>
+                   <option value="letter">Letter</option>
+                 </select>
+               </label>
+             
+               <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1' }}>
+                 Orientation
+                 <select value={exportOrientation} onChange={(e) => setExportOrientation(e.target.value as Orientation)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
+                   <option value="landscape">Landscape</option>
+                   <option value="portrait">Portrait</option>
+                 </select>
+               </label>
+             </div>
+             
+             <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1', marginBottom: '24px' }}>
+               Content
+               <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
+                 <option value="allNodes">All nodes (fit to canvas)</option>
+                 <option value="viewport">Current viewport</option>
+               </select>
+             </label>
+             
+             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+               <button
+                 onClick={() => setExportModalOpen(false)}
+                 style={{ padding: '12px 20px', borderRadius: '8px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
+               >
+                 Cancel
+               </button>
+               <button
+                 onClick={handleExportPdf}
+                 style={{ padding: '12px 24px', borderRadius: '8px', border: 'none', background: '#059669', color: 'white', cursor: 'pointer', fontWeight: 700, boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)' }}
+               >
+                 Export PDF
+               </button>
+             </div>
+           </div>
+         </div>
+       )}
+ 
+       {galleryOpen && (
+         <div
+           style={{
+             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+             backgroundColor: 'rgba(2, 6, 23, 0.8)', zIndex: 2200,
+             display: 'flex', alignItems: 'center', justifyContent: 'center',
+             backdropFilter: 'blur(8px)'
+           }}
+         >
+           <div
+             style={{
+               background: '#1e293b', padding: '32px', borderRadius: '24px',
+               width: '500px', maxHeight: '80vh', overflowY: 'auto',
+               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+               border: '1px solid #334155', color: 'white'
+             }}
+           >
+             <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', fontWeight: 800 }}>
+               Canvas Gallery
+             </h3>
+             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+               {savedCanvases.length === 0 ? (
+                 <p style={{ color: '#64748b', textAlign: 'center', padding: '20px' }}>No saved canvases found.</p>
+               ) : (
+                 savedCanvases.map(canvas => (
+                   <div 
+                     key={canvas.id} 
+                     style={{ 
+                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                       padding: '16px', background: '#0f172a', borderRadius: '12px', 
+                       border: '1px solid #334155', cursor: 'pointer',
+                       transition: 'all 0.2s'
+                     }}
+                     onClick={() => loadCanvas(canvas)}
+                   >
+                     <span style={{ fontWeight: 600 }}>{canvas.name}</span>
+                     <span style={{ fontSize: '12px', color: '#64748b' }}>{new Date(canvas.created_at).toLocaleDateString()}</span>
+                   </div>
+                 ))
+               )}
+             </div>
+             <button 
+               onClick={() => setGalleryOpen(false)}
+               style={{ 
+                 marginTop: '24px', width: '100%', padding: '12px', borderRadius: '12px', 
+                 border: '1px solid #334155', background: 'transparent', color: 'white', 
+                 cursor: 'pointer', fontWeight: 600 
+               }}
+             >
+               Close
+             </button>
+           </div>
+         </div>
+       )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1' }}>
-                Size
-                <select value={exportPaper} onChange={(e) => setExportPaper(e.target.value as PaperSize)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
-                  <option value="a4">A4</option>
-                  <option value="letter">Letter</option>
-                </select>
-              </label>
-
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1' }}>
-                Orientation
-                <select value={exportOrientation} onChange={(e) => setExportOrientation(e.target.value as Orientation)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
-                  <option value="landscape">Landscape</option>
-                  <option value="portrait">Portrait</option>
-                </select>
-              </label>
-            </div>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1', marginBottom: '24px' }}>
-              Content
-              <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)} style={{ background: '#0f172a', color: 'white', border: '1px solid #334155', borderRadius: '8px', padding: '10px' }}>
-                <option value="allNodes">All nodes (fit to canvas)</option>
-                <option value="viewport">Current viewport</option>
-              </select>
-            </label>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button
-                onClick={() => setExportModalOpen(false)}
-                style={{ padding: '12px 20px', borderRadius: '8px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExportPdf}
-                style={{ padding: '12px 24px', borderRadius: '8px', border: 'none', background: '#059669', color: 'white', cursor: 'pointer', fontWeight: 700, boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)' }}
-              >
-                Export PDF
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {modalConfig && (
         <div style={{
@@ -1136,6 +1178,35 @@ function CocktailCanvas() {
                 🌿 Branch & Copy Spec
               </button>
             )}
+            {wheelConfig.dropData && (
+              <>
+                {wheelConfig.dropData.nodeType === 'spec' && wheelConfig.dropData.label !== 'Custom Recipe' && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleWheelAction('expand'); }}
+                    className="wheel-button"
+                    style={{ background: '#3b82f6', color: 'white' }}
+                  >
+                    ✨ Expand Cluster
+                  </button>
+                )}
+                {wheelConfig.dropData.nodeType === 'recipe' && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleWheelAction('expand'); }}
+                    className="wheel-button"
+                    style={{ background: '#3b82f6', color: 'white' }}
+                  >
+                    📑 Expand Recipe
+                  </button>
+                )}
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleWheelAction('node'); }}
+                  className="wheel-button"
+                  style={{ background: '#64748b', color: 'white' }}
+                >
+                  📦 Add Single Node
+                </button>
+              </>
+            )}
             <button 
               onClick={(e) => { e.stopPropagation(); handleWheelAction('blank'); }}
               className="wheel-button"
@@ -1160,6 +1231,35 @@ function CocktailCanvas() {
 export default function App() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(window.innerWidth > 1024);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(window.innerWidth > 1280);
+  const [user, setUser] = useState<any>(null);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+
+  useEffect(() => {
+    // Check for existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleDemoLogin = () => {
+    setUser({ 
+      id: 'demo-user-123', 
+      email: 'demo@example.com',
+      user_metadata: { full_name: 'Demo User' }
+    });
+    setIsLoginOpen(false);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
 
   useEffect(() => {
     const handleResize = () => {
@@ -1178,39 +1278,78 @@ export default function App() {
   return (
     <div className="app-layout">
       <ReactFlowProvider>
-        <Sidebar type="builder" isOpen={leftSidebarOpen} />
-        <Sidebar type="library" isOpen={rightSidebarOpen} />
-        <CocktailCanvas />
-        
-        {(leftSidebarOpen || rightSidebarOpen) && (
-          <div 
-            className="mobile-backdrop" 
-            onClick={() => {
-              setLeftSidebarOpen(false);
-              setRightSidebarOpen(false);
-            }} 
+        <>
+          <Sidebar 
+            type="builder" 
+            isOpen={leftSidebarOpen} 
+            user={user} 
+            onTabChange={(type) => {
+              if (type === 'builder') {
+                setLeftSidebarOpen(true);
+                setRightSidebarOpen(false);
+              } else {
+                setLeftSidebarOpen(false);
+                setRightSidebarOpen(true);
+              }
+            }}
           />
-        )}
-        
-        {/* Mobile Toggle Buttons */}
-        <div className="mobile-toggles">
-          <button 
-            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-            className={`toggle-btn left ${leftSidebarOpen ? 'active' : ''}`}
-            title="Toggle Builder"
-          >
-            <PanelsTopLeft size={20} />
-          </button>
+          <Sidebar 
+            type="library" 
+            isOpen={rightSidebarOpen} 
+            user={user} 
+            onTabChange={(type) => {
+              if (type === 'library') {
+                setRightSidebarOpen(true);
+                setLeftSidebarOpen(false);
+              } else {
+                setRightSidebarOpen(false);
+                setLeftSidebarOpen(true);
+              }
+            }}
+          />
+          <CocktailCanvas 
+            user={user} 
+            onLoginClick={() => setIsLoginOpen(true)} 
+            onLogoutClick={handleSignOut} 
+            onDemoLogin={handleDemoLogin}
+          />
           
-          <button 
-            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-            className={`toggle-btn right ${rightSidebarOpen ? 'active' : ''}`}
-            title="Toggle Library"
-          >
-            <LibraryIcon size={20} />
-          </button>
-        </div>
+          {isLoginOpen && (
+            <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} />
+          )}
+
+          {(leftSidebarOpen || rightSidebarOpen) && (
+            <div 
+              className="mobile-backdrop" 
+              onClick={() => {
+                setLeftSidebarOpen(false);
+                setRightSidebarOpen(false);
+              }} 
+            />
+          )}
+          
+          {/* Mobile Toggle Buttons */}
+          <div className="mobile-toggles">
+            <button 
+              onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+              className={`toggle-btn left ${leftSidebarOpen ? 'active' : ''}`}
+              title="Toggle Builder"
+            >
+              <PanelsTopLeft size={20} />
+            </button>
+            
+            <button 
+              onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+              className={`toggle-btn right ${rightSidebarOpen ? 'active' : ''}`}
+              title="Toggle Library"
+            >
+              <LibraryIcon size={20} />
+            </button>
+          </div>
+        </>
       </ReactFlowProvider>
+
     </div>
   );
 }
+
