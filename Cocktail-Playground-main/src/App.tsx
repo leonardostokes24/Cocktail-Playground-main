@@ -727,9 +727,17 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         zoomOnScroll={true}
         fitView
       >
-        <Background color="#1e293b" gap={28} size={1.2} variant="dots" />
-        {showMiniMap && <MiniMap zoomable pannable nodeColor={(n) => n.type === 'spec' ? '#1e293b' : '#e2e8f0'} />}
+        <Background color="rgba(139,92,246,0.25)" gap={32} size={1.4} variant="dots" />
+        {showMiniMap && <MiniMap zoomable pannable nodeColor={(n) => n.type === 'spec' ? 'rgba(16,185,129,0.4)' : 'rgba(255,255,255,0.15)'} />}
       </ReactFlow>
+
+      {nodes.length === 0 && (
+        <div className="canvas-empty-hint">
+          <div className="hint-icon">🍹</div>
+          <div className="hint-title">Build Your First Spec</div>
+          <div className="hint-sub">Right-click canvas · long-press on mobile · or tap +</div>
+        </div>
+      )}
 
       {/* Floating Canvas Dock */}
       <div className="canvas-dock">

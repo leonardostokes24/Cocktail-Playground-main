@@ -79,8 +79,8 @@ export default function IngredientNode({ id, data, selected }: any) {
         padding: '10px 12px 10px 12px',
         minWidth: 140,
         boxShadow: selected
-          ? `0 0 0 1.5px ${color}90, 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)`
-          : '0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.10)',
+          ? `0 0 0 1.5px ${color}90, -2px 0 8px rgba(255,30,80,0.3), 2px 0 8px rgba(30,120,255,0.3), 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.14)`
+          : '0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.10), -0.5px 0 0 rgba(255,30,80,0.06), 0.5px 0 0 rgba(30,120,255,0.06)',
         position: 'relative',
         transition: 'box-shadow 0.2s',
       }}
@@ -160,15 +160,19 @@ export default function IngredientNode({ id, data, selected }: any) {
       {/* Pricing section */}
       <div style={{
         marginTop: '8px',
-        borderTop: '1px solid rgba(51, 65, 85, 0.4)',
+        borderTop: '1px solid rgba(255,255,255,0.06)',
         paddingTop: '6px',
+        background: 'rgba(255,255,255,0.02)',
+        borderRadius: '6px',
+        padding: '5px 6px',
+        marginTop: '8px',
       }}>
         {data.unitPrice ? (
-          <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>
-            {data.currency || '$'}{data.unitPrice.toFixed(2)}/oz
+          <div style={{ fontSize: '10px', color: '#10b981', fontWeight: 700, textShadow: '-0.5px 0 rgba(255,30,80,0.3), 0.5px 0 rgba(30,120,255,0.3)' }}>
+            {data.currency || '$'}{data.unitPrice.toFixed(2)}<span style={{ color: '#64748b', fontWeight: 500 }}>/oz</span>
           </div>
         ) : (
-          <div style={{ fontSize: '10px', color: '#475569', fontStyle: 'italic' }}>No price set</div>
+          <div style={{ fontSize: '10px', color: 'rgba(100,116,139,0.6)', fontStyle: 'italic' }}>No price set</div>
         )}
 
         <div className="no-export" style={{ display: 'flex', justifyContent: 'flex-start', gap: '4px', marginTop: '4px' }}>

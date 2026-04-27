@@ -136,7 +136,9 @@ export default function SpecNode({ id, data, selected }: any) {
         outline: 'none',
         borderRadius: '14px',
         padding: '18px',
-        boxShadow: `0 16px 48px ${shadowColor}, inset 0 1px 0 rgba(255,255,255,${isMatched ? '0.12' : '0.08'})`,
+        boxShadow: selected
+          ? `0 0 0 1.5px rgba(16,185,129,0.6), -2px 0 10px rgba(255,30,80,0.25), 2px 0 10px rgba(30,120,255,0.25), 0 16px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.14)`
+          : `0 16px 48px ${shadowColor}, inset 0 1px 0 rgba(255,255,255,${isMatched ? '0.12' : '0.08'}), -0.5px 0 0 rgba(255,30,80,0.07), 0.5px 0 0 rgba(30,120,255,0.07)`,
         minWidth: '240px',
         transition: 'box-shadow 0.25s ease, border-color 0.2s ease',
         backdropFilter: 'blur(24px) saturate(160%)',
@@ -209,8 +211,16 @@ export default function SpecNode({ id, data, selected }: any) {
                style={{ width: '90%', fontSize: '18px', fontWeight: 'bold', background: '#1e293b', color: 'white', borderRadius: '4px', border: '1px solid #475569', padding: '2px 8px', outline: 'none' }}
              />
           ) : (
-            <div 
-              style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.02em', color: 'white' }}
+            <div
+              style={{
+                fontSize: '20px',
+                fontWeight: 800,
+                letterSpacing: '-0.02em',
+                color: 'white',
+                textShadow: isMatched
+                  ? '-1px 0 rgba(255,30,80,0.35), 1px 0 rgba(30,120,255,0.35), 0 0 16px rgba(16,185,129,0.25)'
+                  : '-0.5px 0 rgba(255,30,80,0.2), 0.5px 0 rgba(30,120,255,0.2)',
+              }}
             >
               {data.label}
             </div>
