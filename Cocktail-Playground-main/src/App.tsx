@@ -38,6 +38,7 @@ import { exportFlowToPdf, type ExportMode, type Orientation, type PaperSize } fr
 import { supabase } from './services/supabaseClient';
 import { HierarchyManager } from './utils/hierarchy';
 import { sortNodesByHierarchy } from './utils/hierarchySorting';
+import FluidGlass from './components/FluidGlass/FluidGlass';
 
 const nodeTypes = {
   ingredient: IngredientNode,
@@ -730,6 +731,11 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         <Background color="#1e293b" gap={28} size={1.2} variant="dots" />
         {showMiniMap && <MiniMap zoomable pannable nodeColor={(n) => n.type === 'spec' ? '#1e293b' : '#e2e8f0'} />}
       </ReactFlow>
+
+      {/* Fluid glass lens — follows cursor, pointer-events disabled so React Flow stays interactive */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }} className="no-export">
+        <FluidGlass mode="lens" lensProps={{ ior: 1.18, thickness: 6, chromaticAberration: 0.08 }} />
+      </div>
 
       {/* Floating Canvas Dock */}
       <div className="canvas-dock">
