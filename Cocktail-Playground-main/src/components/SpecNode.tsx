@@ -127,16 +127,18 @@ export default function SpecNode({ id, data, selected }: any) {
 
   return (
     <div 
-      style={{ 
+      style={{
         background: bgColor,
         color: '#f8fafc',
-        border: `2px solid ${selected ? '#10b981' : borderColor}`, 
-        borderRadius: '16px', 
-        padding: '20px',
-        boxShadow: `0 20px 40px ${shadowColor}`,
+        border: `1px solid ${selected ? '#10b981' : borderColor}`,
+        outline: selected ? `1px solid #10b981` : 'none',
+        borderRadius: '14px',
+        padding: '18px',
+        boxShadow: `0 16px 36px ${shadowColor}, inset 0 1px 0 rgba(255,255,255,0.05)`,
         minWidth: '240px',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        backdropFilter: 'blur(8px)',
+        transition: 'box-shadow 0.25s ease, border-color 0.2s ease',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         position: 'relative'
       }}
     >
@@ -307,7 +309,7 @@ export default function SpecNode({ id, data, selected }: any) {
            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
              <ul style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: '12px' }}>
                {data.ingredientsList.map((ing: any, idx: number) => (
-                 <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: idx < data.ingredientsList.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                 <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: idx < data.ingredientsList.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
                    <span style={{ fontWeight: 800, color: isMatched ? '#34d399' : '#cbd5e1' }}>{ing.amount}</span>
                    <span style={{ color: '#94a3b8' }}>{ing.name}</span>
                  </li>

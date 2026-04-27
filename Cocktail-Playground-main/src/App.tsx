@@ -54,6 +54,9 @@ const getId = () => `node_${idCounter++}_${Date.now()}`;
 function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { user: any, onLoginClick: () => void, onLogoutClick: () => void, onDemoLogin: () => void }) {
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const overflowRef = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [showMiniMap, setShowMiniMap] = useState(true);
@@ -162,6 +165,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
   // --- Radial Wheel ---
   const [radialPos, setRadialPos] = useState<{ x: number; y: number } | null>(null);
+  const [showOverflow, setShowOverflow] = useState(false);
 
   // --- Auto-Matcher & Recipe List Sync ---
   useEffect(() => {
@@ -361,6 +365,50 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       return changed ? nextNodes : nds;
     });
   }, [edges, setNodes, lockStatesHash]);
+
+  // Close overflow menu when clicking outside
+  useEffect(() => {
+    if (!showOverflow) return;
+    const handler = (e: MouseEvent) => {
+      if (overflowRef.current && !overflowRef.current.contains(e.target as HTMLElement)) {
+        setShowOverflow(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showOverflow]);
+
+  // Long-press to open radial wheel on touch devices
+  const onCanvasTouchStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStartPos.current = { x: t.clientX, y: t.clientY };
+    longPressTimer.current = setTimeout(() => {
+      if (touchStartPos.current) {
+        setRadialPos({ x: touchStartPos.current.x, y: touchStartPos.current.y });
+        touchStartPos.current = null;
+      }
+    }, 550);
+  }, []);
+
+  const onCanvasTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchStartPos.current || !longPressTimer.current) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchStartPos.current.x;
+    const dy = t.clientY - touchStartPos.current.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 12) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      touchStartPos.current = null;
+    }
+  }, []);
+
+  const onCanvasTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    touchStartPos.current = null;
+  }, []);
 
   // --- Handle Connections ---
   const onConnect = useCallback(
@@ -659,7 +707,13 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   }, [exportMode, exportOrientation, exportPaper, fitView, getViewport, setViewport]);
 
   return (
-    <div className="canvas-container" ref={reactFlowWrapper}>
+    <div
+      className="canvas-container"
+      ref={reactFlowWrapper}
+      onTouchStart={onCanvasTouchStart}
+      onTouchMove={onCanvasTouchMove}
+      onTouchEnd={onCanvasTouchEnd}
+    >
       <ReactFlow
         nodes={sortedNodes}
         edges={edges}
@@ -672,6 +726,8 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{ type: 'custom' }}
+        panOnScroll={false}
+        zoomOnScroll={true}
         fitView
       >
         <Background color="#334155" gap={24} variant="dots" />
@@ -704,58 +760,102 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       </div>
 
       <div className="canvas-header">
-        <div className="header-badge">
-          <span className="badge-text">Canvas: <span className="badge-accent">Menu R&D Spring 24</span></span>
-          <span className="badge-divider">|</span>
-          <span className="badge-text">Nodes: {nodes.length}</span>
+        {/* Brand */}
+        <div className="header-brand">
+          <div className="header-logo">🍹</div>
+          <span className="header-title desktop-only">Cocktail Playground</span>
+          <span className="header-count">{nodes.length} nodes</span>
         </div>
+
+        {/* Actions */}
         <div className="header-actions">
-          <button className="header-btn desktop-only">Presentation Mode</button>
-          {!user ? (
-            <>
-              <button className="header-btn" onClick={onLoginClick}>
-                <User size={16} /> Sign In
-              </button>
-              <button className="header-btn" onClick={onDemoLogin} style={{ border: '1px dashed #10b981', color: '#10b981' }}>
-                🚀 Demo Mode
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                className="header-btn"
-                onClick={onLogoutClick}
-                title="Sign Out"
-              >
-                <LogOut size={16} /> Sign Out
-              </button>
-              <button
-                className="header-btn"
-                onClick={() => setGalleryOpen(true)}
-                title="Load Saved Canvas"
-              >
-                <FolderOpen size={16} /> Gallery
-              </button>
-              <button
-                className="header-btn"
-                onClick={() => {
-                  const name = prompt('Enter canvas name:');
-                  if (name) {
-                    setCanvasName(name);
-                    saveCanvas();
-                  }
-                }}
-                title="Save Current Canvas"
-              >
-                <Save size={16} /> Save
-              </button>
-            </>
-          )}
+          {/* Desktop secondary buttons */}
+          <div className="header-secondary">
+            {!user ? (
+              <>
+                <button className="header-btn" onClick={onLoginClick}>
+                  <User size={14} /> Sign In
+                </button>
+                <button className="header-btn" onClick={onDemoLogin} style={{ border: '1px dashed #10b981', color: '#10b981' }}>
+                  🚀 Demo
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="header-btn" onClick={() => setGalleryOpen(true)}>
+                  <FolderOpen size={14} /> Gallery
+                </button>
+                <button
+                  className="header-btn"
+                  onClick={() => {
+                    const name = prompt('Enter canvas name:');
+                    if (name) { setCanvasName(name); saveCanvas(); }
+                  }}
+                >
+                  <Save size={14} /> Save
+                </button>
+                <button className="header-btn" onClick={onLogoutClick}>
+                  <LogOut size={14} /> Sign Out
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Mobile overflow ⋯ */}
+          <div className="mobile-overflow-wrapper" ref={overflowRef}>
+            <button
+              className="header-btn mobile-overflow-btn"
+              onClick={() => setShowOverflow(o => !o)}
+              title="More options"
+            >
+              ⋯
+            </button>
+            {showOverflow && (
+              <div className="overflow-menu">
+                {!user ? (
+                  <>
+                    <button className="overflow-item" onClick={() => { onLoginClick(); setShowOverflow(false); }}>
+                      👤 Sign In
+                    </button>
+                    <button className="overflow-item" onClick={() => { onDemoLogin(); setShowOverflow(false); }}>
+                      🚀 Demo Mode
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="overflow-item" onClick={() => { setGalleryOpen(true); setShowOverflow(false); }}>
+                      📁 Gallery
+                    </button>
+                    <button className="overflow-item" onClick={() => {
+                      const name = prompt('Enter canvas name:');
+                      if (name) { setCanvasName(name); saveCanvas(); }
+                      setShowOverflow(false);
+                    }}>
+                      💾 Save
+                    </button>
+                    <button className="overflow-item" onClick={() => { onLogoutClick(); setShowOverflow(false); }}>
+                      ↩ Sign Out
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
           <button className="header-btn primary" onClick={() => setExportModalOpen(true)} disabled={isExporting}>
             {isExporting ? 'Exporting...' : 'Export Spec'}
           </button>
         </div>
       </div>
+
+      {/* Mobile FAB — opens radial wheel at screen centre */}
+      <button
+        className="mobile-fab no-export"
+        onClick={() => setRadialPos({ x: window.innerWidth / 2, y: window.innerHeight - 160 })}
+        title="Add node"
+      >
+        +
+      </button>
 
       {exportMessage && (
         <div
