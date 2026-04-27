@@ -202,8 +202,10 @@ export default function RadialWheel({
                 top: cy - SLICE_SIZE / 2,
                 width: SLICE_SIZE,
                 height: SLICE_SIZE,
-                borderColor: isActive ? cat.color : '#334155',
-                boxShadow: isActive ? `0 0 14px ${cat.color}55` : undefined,
+                borderColor: isActive ? cat.color : 'rgba(255,255,255,0.12)',
+                boxShadow: isActive
+                  ? `0 0 20px ${cat.color}55, 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15)`
+                  : '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)',
               }}
               onClick={(e) => { e.stopPropagation(); handleCategoryClick(cat.id); }}
               title={cat.label}

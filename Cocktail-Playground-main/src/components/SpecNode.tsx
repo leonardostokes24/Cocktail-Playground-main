@@ -35,9 +35,9 @@ export default function SpecNode({ id, data, selected }: any) {
   const isCustom = data.isCustomOverride;
   
   // Theme styling
-  const bgColor = isMatched ? 'rgba(6, 78, 59, 0.4)' : '#0f172a'; // emerald-950/40 or slate-950
-  const borderColor = isMatched ? '#10b981' : isCustom ? '#f59e0b' : '#334155'; // emerald-500, amber-500, or slate-700
-  const shadowColor = isMatched ? 'rgba(16, 185, 129, 0.1)' : 'rgba(0,0,0,0.4)';
+  const bgColor = isMatched ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.06)';
+  const borderColor = isMatched ? 'rgba(16,185,129,0.35)' : isCustom ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.10)';
+  const shadowColor = isMatched ? 'rgba(16,185,129,0.12)' : 'rgba(0,0,0,0.4)';
 
   const handleSave = () => {
     setIsEditing(false);
@@ -132,15 +132,15 @@ export default function SpecNode({ id, data, selected }: any) {
       style={{
         background: bgColor,
         color: '#f8fafc',
-        border: `1px solid ${selected ? '#10b981' : borderColor}`,
-        outline: selected ? `1px solid #10b981` : 'none',
+        border: `1px solid ${selected ? 'rgba(16,185,129,0.55)' : borderColor}`,
+        outline: 'none',
         borderRadius: '14px',
         padding: '18px',
-        boxShadow: `0 16px 36px ${shadowColor}, inset 0 1px 0 rgba(255,255,255,0.05)`,
+        boxShadow: `0 16px 48px ${shadowColor}, inset 0 1px 0 rgba(255,255,255,${isMatched ? '0.12' : '0.08'})`,
         minWidth: '240px',
         transition: 'box-shadow 0.25s ease, border-color 0.2s ease',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
+        backdropFilter: 'blur(24px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
         position: 'relative'
       }}
     >
@@ -238,7 +238,7 @@ export default function SpecNode({ id, data, selected }: any) {
         </Button>
       </div>
 
-       <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '12px', marginTop: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+       <div style={{ background: 'rgba(0,0,0,0.22)', borderRadius: '10px', padding: '12px', marginTop: '12px', border: '1px solid rgba(255,255,255,0.07)' }}>
          {(!data.ingredientsList || data.ingredientsList.length === 0) ? (
            <div style={{ fontSize: '12px', color: '#475569', fontStyle: 'italic' }}>Connect ingredients on canvas...</div>
          ) : (

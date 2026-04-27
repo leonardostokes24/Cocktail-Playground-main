@@ -859,7 +859,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       )}
 
       <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-transparent border-0 shadow-none">
           <DialogHeader>
             <DialogTitle>Export Canvas to PDF</DialogTitle>
             <DialogDescription>Choose layout and whether to export the current viewport or fit all nodes.</DialogDescription>
@@ -898,7 +898,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       </Dialog>
 
       <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg bg-transparent border-0 shadow-none">
           <DialogHeader>
             <DialogTitle>Canvas Gallery</DialogTitle>
           </DialogHeader>
@@ -927,7 +927,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       </Dialog>
 
       <Dialog open={modalConfig !== null} onOpenChange={(open) => { if (!open) setModalConfig(null); }}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm bg-transparent border-0 shadow-none">
           {modalConfig && (modalConfig.type === 'amount' || modalConfig.type === 'edit-edge') && (
             <>
               <DialogHeader>

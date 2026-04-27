@@ -70,16 +70,17 @@ export default function IngredientNode({ id, data, selected }: any) {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       style={{
-        background: 'rgba(30, 41, 59, 0.88)',
-        backdropFilter: 'blur(8px)',
-        border: `1px solid ${selected ? color : color + '40'}`,
+        background: 'rgba(255,255,255,0.06)',
+        backdropFilter: 'blur(20px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+        border: `1px solid rgba(255,255,255,0.09)`,
         borderLeft: `3px solid ${color}`,
         borderRadius: '10px',
         padding: '10px 12px 10px 12px',
         minWidth: 140,
         boxShadow: selected
-          ? `0 0 0 1px ${color}60, 0 4px 16px rgba(0,0,0,0.35)`
-          : '0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)',
+          ? `0 0 0 1.5px ${color}90, 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)`
+          : '0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.10)',
         position: 'relative',
         transition: 'box-shadow 0.2s',
       }}

@@ -36,13 +36,15 @@ export default function ContainerNode({ id, data, selected }: any) {
   return (
     <div 
       style={{
-        background: 'rgba(30, 41, 59, 0.2)',
-        border: `2px dashed ${selected ? '#10b981' : '#334155'}`,
+        background: 'rgba(255,255,255,0.02)',
+        border: `2px dashed ${selected ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.12)'}`,
         borderRadius: '12px',
         height: '100%',
         width: '100%',
         position: 'relative',
-        backdropFilter: 'blur(2px)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
       }}
     >
       <NodeResizer 
@@ -65,11 +67,11 @@ export default function ContainerNode({ id, data, selected }: any) {
         <button 
           onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
           title="Edit group name"
-          style={{ 
-            background: '#334155', 
-            border: 'none', 
-            cursor: 'pointer', 
-            fontSize: '10px', 
+          style={{
+            background: 'rgba(255,255,255,0.10)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            cursor: 'pointer',
+            fontSize: '10px',
             color: 'white',
             width: '24px',
             height: '24px',
@@ -77,8 +79,9 @@ export default function ContainerNode({ id, data, selected }: any) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            transition: 'all 0.2s'
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            transition: 'all 0.2s',
+            backdropFilter: 'blur(12px)',
           }}
         >
           ✏️
