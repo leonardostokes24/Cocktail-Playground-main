@@ -165,7 +165,6 @@ export default function IngredientNode({ id, data, selected }: any) {
         background: 'rgba(255,255,255,0.02)',
         borderRadius: '6px',
         padding: '5px 6px',
-        marginTop: '8px',
       }}>
         {data.unitPrice ? (
           <div style={{ fontSize: '10px', color: '#10b981', fontWeight: 700, textShadow: '-0.5px 0 rgba(255,30,80,0.3), 0.5px 0 rgba(30,120,255,0.3)' }}>

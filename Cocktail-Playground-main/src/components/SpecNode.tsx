@@ -189,8 +189,6 @@ export default function SpecNode({ id, data, selected }: any) {
           ✕
         </Button>
       </div>
-// ... rest of the component
-
 
       <Handle className="no-export" id="target-left" type="target" position={Position.Left} style={{ background: '#fff', width: '4px', height: '12px', borderRadius: '1px', border: `1px solid ${borderColor}` }} />
       

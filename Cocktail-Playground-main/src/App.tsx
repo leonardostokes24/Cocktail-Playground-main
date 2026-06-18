@@ -257,12 +257,17 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         { width: 300, height: 300 }
       );
 
-      const parentSpecCandidate = HierarchyManager.pickContainingNode(
-        nds.filter(n => n.type === 'spec' && n.id !== draggedNode.id),
-        abs,
-        nds,
-        { width: 240, height: 160 }
-      );
+      // Only ingredients can be pulled into a spec via drag — dragging a spec
+      // near another spec must NOT parent it, or nodes visually stack and
+      // their coordinates become relative, breaking layout.
+      const parentSpecCandidate = draggedNode.type === 'ingredient'
+        ? HierarchyManager.pickContainingNode(
+            nds.filter(n => n.type === 'spec' && n.id !== draggedNode.id),
+            abs,
+            nds,
+            { width: 240, height: 160 }
+          )
+        : null;
 
       // A Spec only acts as a parent if it's in "Locked" mode
       const parentSpec = (parentSpecCandidate?.data?.isLocked !== false) ? parentSpecCandidate : null;
@@ -457,7 +462,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     if (!modalConfig) return;
 
     if (modalConfig.type === 'amount') {
-      const newEdge = { ...modalConfig.params, label: amountInput, animated: true, type: 'custom' };
+      const newEdge = { ...modalConfig.params, id: `edge_${Date.now()}`, label: amountInput, animated: true, type: 'custom' };
       setEdges((eds) => addEdge(newEdge, eds));
     }
     else if (modalConfig.type === 'edit-edge') {
@@ -727,7 +732,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         zoomOnScroll={true}
         fitView
       >
-        <Background color="rgba(139,92,246,0.25)" gap={32} size={1.4} variant="dots" />
+        <Background color="rgba(139,92,246,0.25)" gap={32} size={1.4} variant="cross" />
         {showMiniMap && <MiniMap zoomable pannable nodeColor={(n) => n.type === 'spec' ? 'rgba(16,185,129,0.4)' : 'rgba(255,255,255,0.15)'} />}
       </ReactFlow>
 

@@ -30,7 +30,7 @@ async function migrate() {
       process.exit(1);
     }
 
-    console.log(`Successfully migrated ${data?.length || ibaCocktails.length} cocktails to Supabase!`);
+    console.log(`Successfully migrated ${(data?.length ?? 0) || ibaCocktails.length} cocktails to Supabase!`);
   } catch (err) {
     console.error('Unexpected error during migration:', err);
     process.exit(1);
