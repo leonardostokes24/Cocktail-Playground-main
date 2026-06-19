@@ -67,6 +67,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [showMiniMap, setShowMiniMap] = useState(true);
@@ -84,6 +85,14 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [savedCanvases, setSavedCanvases] = useState<any[]>([]);
   const [canvasName, setCanvasName] = useState("");
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }, []);
 
   const fetchCanvases = useCallback(async () => {
     if (!user) return;
@@ -106,38 +115,36 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     fetchCanvases();
   }, [fetchCanvases]);
 
-  const saveCanvas = async () => {
-    if (!user || !canvasName) return;
+  const saveCanvas = async (nameToSave: string) => {
+    if (!user || !nameToSave.trim()) return;
+    const name = nameToSave.trim();
 
     if (user.id === 'demo-user-123') {
       const local = localStorage.getItem('demo_canvases');
       const current = local ? JSON.parse(local) : [];
-      const updated = [...current.filter((c: any) => c.name !== canvasName), {
+      const updated = [...current.filter((c: any) => c.name !== name), {
         id: Date.now().toString(),
-        name: canvasName,
+        name,
         nodes,
         edges,
         user_id: user.id,
         created_at: new Date().toISOString(),
       }];
       localStorage.setItem('demo_canvases', JSON.stringify(updated));
-      alert('Canvas saved successfully (Demo Mode)!');
-      setCanvasName("");
+      showToast('Canvas saved (Demo Mode)');
+      setSaveModalOpen(false);
+      setCanvasName('');
       fetchCanvases();
       return;
     }
 
-    const { error } = await supabase.from('canvases').upsert({
-      name: canvasName,
-      nodes,
-      edges,
-      user_id: user.id,
-    });
+    const { error } = await supabase.from('canvases').upsert({ name, nodes, edges, user_id: user.id });
     if (error) {
-      alert('Error saving canvas: ' + error.message);
+      showToast('Error saving: ' + error.message, 'error');
     } else {
-      alert('Canvas saved successfully!');
-      setCanvasName("");
+      showToast('Canvas saved!');
+      setSaveModalOpen(false);
+      setCanvasName('');
       fetchCanvases();
     }
   };
@@ -797,10 +804,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
                 <Button variant="outline" size="sm" onClick={() => setGalleryOpen(true)}>
                   <FolderOpen size={14} /> Gallery
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => {
-                  const name = prompt('Enter canvas name:');
-                  if (name) { setCanvasName(name); saveCanvas(); }
-                }}>
+                <Button variant="outline" size="sm" onClick={() => setSaveModalOpen(true)}>
                   <Save size={14} /> Save
                 </Button>
                 <Button variant="outline" size="sm" onClick={onLogoutClick}>
@@ -824,10 +828,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
               ) : (
                 <>
                   <DropdownMenuItem onClick={() => setGalleryOpen(true)}><FolderOpen size={14} /> Gallery</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => {
-                    const name = prompt('Enter canvas name:');
-                    if (name) { setCanvasName(name); saveCanvas(); }
-                  }}><Save size={14} /> Save</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSaveModalOpen(true)}><Save size={14} /> Save</DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={onLogoutClick}><LogOut size={14} /> Sign Out</DropdownMenuItem>
                 </>
@@ -870,6 +871,49 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
           {exportMessage}
         </div>
       )}
+
+      {toast && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '92px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 2200,
+            background: toast.type === 'error' ? 'rgba(127,29,29,0.95)' : 'rgba(6,78,59,0.95)',
+            border: `1px solid ${toast.type === 'error' ? '#dc2626' : '#059669'}`,
+            color: '#f8fafc',
+            borderRadius: '10px',
+            padding: '10px 18px',
+            fontSize: '12px',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+          }}
+        >
+          {toast.type === 'error' ? '✗ ' : '✓ '}{toast.message}
+        </div>
+      )}
+
+      <Dialog open={saveModalOpen} onOpenChange={(open) => { setSaveModalOpen(open); if (!open) setCanvasName(''); }}>
+        <DialogContent className="sm:max-w-sm bg-transparent border-0 shadow-none">
+          <DialogHeader>
+            <DialogTitle>Save Canvas</DialogTitle>
+            <DialogDescription>Give this canvas a name to save it to your gallery.</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            placeholder="e.g. Saturday Night Menu"
+            value={canvasName}
+            onChange={(e) => setCanvasName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && canvasName.trim() && saveCanvas(canvasName)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setSaveModalOpen(false); setCanvasName(''); }}>Cancel</Button>
+            <Button onClick={() => saveCanvas(canvasName)} disabled={!canvasName.trim()}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
         <DialogContent className="sm:max-w-md bg-transparent border-0 shadow-none">

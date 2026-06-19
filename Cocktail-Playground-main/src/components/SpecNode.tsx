@@ -12,6 +12,8 @@ export default function SpecNode({ id, data, selected }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(data.label);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+  const [saveMsg, setSaveMsg] = useState('');
   const [isEditingSalePrice, setIsEditingSalePrice] = useState(false);
   const [salePriceInput, setSalePriceInput] = useState('');
   
@@ -105,13 +107,19 @@ export default function SpecNode({ id, data, selected }: any) {
     );
   };
 
+  const flashStatus = (status: 'saved' | 'error', msg: string) => {
+    setSaveStatus(status);
+    setSaveMsg(msg);
+    setTimeout(() => { setSaveStatus('idle'); setSaveMsg(''); }, 2500);
+  };
+
   const saveToLibrary = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        alert('Please sign in to save custom recipes!');
+        flashStatus('error', 'Sign in to save recipes');
         return;
       }
 
@@ -126,7 +134,7 @@ export default function SpecNode({ id, data, selected }: any) {
           ingredients: data.ingredientsList || []
         }];
         localStorage.setItem('demo_recipes', JSON.stringify(updated));
-        alert('Recipe saved to your library (Demo Mode)!');
+        flashStatus('saved', 'Saved to library');
         return;
       }
 
@@ -139,9 +147,9 @@ export default function SpecNode({ id, data, selected }: any) {
       });
 
       if (error) throw error;
-      alert('Recipe saved to your library!');
+      flashStatus('saved', 'Saved to library');
     } catch (err: any) {
-      alert('Error saving recipe: ' + err.message);
+      flashStatus('error', err.message || 'Save failed');
     } finally {
       setIsSaving(false);
     }
@@ -180,13 +188,14 @@ export default function SpecNode({ id, data, selected }: any) {
 
         <Button
           size="icon-xs"
-          variant="default"
+          variant={saveStatus === 'saved' ? 'default' : saveStatus === 'error' ? 'destructive' : 'default'}
           onClick={saveToLibrary}
           title="Save to Library"
           className="rounded-full shadow-md"
           disabled={isSaving}
+          style={saveStatus === 'saved' ? { background: '#059669' } : undefined}
         >
-          {isSaving ? '…' : <Save size={11} />}
+          {isSaving ? '…' : saveStatus === 'saved' ? '✓' : saveStatus === 'error' ? '✗' : <Save size={11} />}
         </Button>
 
         <Button
@@ -332,6 +341,12 @@ export default function SpecNode({ id, data, selected }: any) {
          </div>
        </div>
 
+
+      {saveMsg && (
+        <div style={{ marginTop: '6px', fontSize: '9px', fontWeight: 700, textAlign: 'right', color: saveStatus === 'error' ? '#f87171' : '#10b981' }}>
+          {saveStatus === 'error' ? '✗ ' : '✓ '}{saveMsg}
+        </div>
+      )}
 
       <Handle className="no-export" id="source-right" type="source" position={Position.Right} style={{ background: '#fff', width: '4px', height: '12px', borderRadius: '1px', border: `1px solid ${borderColor}` }} />
     </div>
