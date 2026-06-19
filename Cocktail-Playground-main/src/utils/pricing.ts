@@ -28,3 +28,8 @@ export const calculateCostPerOz = (totalPrice: number, volumeStr: string): numbe
   if (volume === 0) return 0;
   return totalPrice / volume;
 };
+
+export const calculateGP = (salePrice: number, cost: number): number => {
+  if (salePrice <= 0) return 0;
+  return ((salePrice - cost) / salePrice) * 100;
+};

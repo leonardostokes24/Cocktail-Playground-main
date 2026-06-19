@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
 import { supabase } from '../services/supabaseClient';
 import { Save } from 'lucide-react';
-import { parseAmount } from '../utils/pricing';
+import { parseAmount, calculateGP } from '../utils/pricing';
 import { HierarchyManager } from '../utils/hierarchy';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,8 @@ export default function SpecNode({ id, data, selected }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(data.label);
   const [isSaving, setIsSaving] = useState(false);
+  const [isEditingSalePrice, setIsEditingSalePrice] = useState(false);
+  const [salePriceInput, setSalePriceInput] = useState('');
   
   const totalCost = useMemo(() => {
     const edges = getEdges().filter(e => e.target === id);
@@ -29,6 +31,13 @@ export default function SpecNode({ id, data, selected }: any) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, data.ingredientsList, getEdges, getNodes]);
 
+  const hasIngredients = data.ingredientsList && data.ingredientsList.length > 0;
+  const salePrice = data.salePrice as number | undefined;
+  const gp = hasIngredients && totalCost > 0 && salePrice && salePrice > 0
+    ? calculateGP(salePrice, totalCost)
+    : null;
+  const gpColor = gp === null ? '#64748b' : gp >= 70 ? '#10b981' : gp >= 65 ? '#f59e0b' : '#f87171';
+
   const isMatched = data.isMatched && !data.isCustomOverride;
 
   const isLockedNode = data.isLocked ?? true; // Default to locked as requested by user
@@ -38,6 +47,17 @@ export default function SpecNode({ id, data, selected }: any) {
   const bgColor = isMatched ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.06)';
   const borderColor = isMatched ? 'rgba(16,185,129,0.35)' : isCustom ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.10)';
   const shadowColor = isMatched ? 'rgba(16,185,129,0.12)' : 'rgba(0,0,0,0.4)';
+
+  const handleSalePriceSave = () => {
+    setIsEditingSalePrice(false);
+    const parsed = parseFloat(salePriceInput);
+    const value = isNaN(parsed) || parsed <= 0 ? undefined : parsed;
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, salePrice: value } } : node
+      )
+    );
+  };
 
   const handleSave = () => {
     setIsEditing(false);
@@ -259,24 +279,57 @@ export default function SpecNode({ id, data, selected }: any) {
                  </li>
                ))}
              </ul>
-             <div style={{ 
-               display: 'flex', 
-               justifyContent: 'space-between', 
-               alignItems: 'center', 
-               marginTop: '4px', 
-               paddingTop: '8px', 
-               borderTop: '2px solid rgba(255,255,255,0.1)',
-               fontSize: '13px',
-               fontWeight: 'bold',
-               color: '#f8fafc'
-             }}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', paddingTop: '8px', borderTop: '2px solid rgba(255,255,255,0.1)' }}>
                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>EST. COST:</span>
-               <span style={{ color: '#10b981', textShadow: '0 0 10px rgba(16, 185, 129, 0.3)' }}>
+               <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#10b981', textShadow: '0 0 10px rgba(16, 185, 129, 0.3)' }}>
                  ${totalCost.toFixed(2)}
                </span>
              </div>
            </div>
          )}
+
+         {/* Pricing section — always visible */}
+         <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '8px', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+             <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>SALE PRICE:</span>
+             {isEditingSalePrice ? (
+               <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                 <span style={{ fontSize: '11px', color: '#94a3b8' }}>$</span>
+                 <input
+                   autoFocus
+                   type="number"
+                   min="0"
+                   step="0.50"
+                   value={salePriceInput}
+                   onChange={(e) => setSalePriceInput(e.target.value)}
+                   onBlur={handleSalePriceSave}
+                   onKeyDown={(e) => {
+                     if (e.key === 'Enter') handleSalePriceSave();
+                     if (e.key === 'Escape') setIsEditingSalePrice(false);
+                   }}
+                   style={{ width: '58px', fontSize: '12px', fontWeight: 700, background: '#1e293b', color: 'white', borderRadius: '4px', border: '1px solid #475569', padding: '1px 4px', outline: 'none', textAlign: 'right' }}
+                 />
+               </div>
+             ) : (
+               <span
+                 onClick={() => { setSalePriceInput(salePrice?.toFixed(2) ?? ''); setIsEditingSalePrice(true); }}
+                 title="Click to set sale price"
+                 style={{ fontSize: '12px', fontWeight: 700, color: salePrice ? '#f8fafc' : '#475569', cursor: 'pointer', borderBottom: salePrice ? 'none' : '1px dotted #475569' }}
+               >
+                 {salePrice ? `$${salePrice.toFixed(2)}` : 'Set price'}
+               </span>
+             )}
+           </div>
+
+           {gp !== null && (
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+               <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>GP:</span>
+               <span style={{ fontSize: '14px', fontWeight: 800, color: gpColor, textShadow: `0 0 10px ${gpColor}55` }}>
+                 {gp.toFixed(1)}%
+               </span>
+             </div>
+           )}
+         </div>
        </div>
 
 
