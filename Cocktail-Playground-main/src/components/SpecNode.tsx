@@ -244,9 +244,7 @@ export default function SpecNode({ id, data, selected }: any) {
                 fontWeight: 800,
                 letterSpacing: '-0.02em',
                 color: 'white',
-                textShadow: isMatched
-                  ? '-1px 0 rgba(255,30,80,0.35), 1px 0 rgba(30,120,255,0.35), 0 0 16px rgba(16,185,129,0.25)'
-                  : '-0.5px 0 rgba(255,30,80,0.2), 0.5px 0 rgba(30,120,255,0.2)',
+                textShadow: isMatched ? '0 0 16px rgba(16,185,129,0.25)' : 'none',
               }}
             >
               {data.label}
