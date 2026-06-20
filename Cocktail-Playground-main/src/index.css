@@ -159,7 +159,6 @@ body {
   justify-content: center;
   font-size: 14px;
   flex-shrink: 0;
-  animation: logoChroma 4s ease-in-out infinite;
 }
 
 .header-title {
@@ -605,7 +604,7 @@ body {
 
 .mobile-fab:hover {
   transform: scale(1.08);
-  box-shadow: 0 6px 26px rgba(16,185,129,0.55), -2px 0 8px rgba(255,30,80,0.3), 2px 0 8px rgba(30,120,255,0.3);
+  box-shadow: 0 6px 26px rgba(16,185,129,0.55);
 }
 
 @media (max-width: 1024px) {
@@ -689,8 +688,8 @@ body {
 }
 
 @keyframes fabPulse {
-  0%, 100% { box-shadow: 0 4px 20px rgba(16,185,129,0.45), -1px 0 8px rgba(255,30,80,0.2), 1px 0 8px rgba(30,120,255,0.2); }
-  50%       { box-shadow: 0 6px 28px rgba(16,185,129,0.65), -2px 0 10px rgba(255,30,80,0.3), 2px 0 10px rgba(30,120,255,0.3); }
+  0%, 100% { box-shadow: 0 4px 20px rgba(16,185,129,0.45); }
+  50%       { box-shadow: 0 6px 28px rgba(16,185,129,0.65); }
 }
 
 /* ── Node entrance animation ─────────────────────────────── */
@@ -722,8 +721,6 @@ body {
 
 .canvas-empty-hint .hint-icon {
   font-size: 56px;
-  animation: chromaShift 3s ease-in-out infinite;
-  filter: drop-shadow(-1.5px 0 rgba(255,30,80,0.3)) drop-shadow(1.5px 0 rgba(30,120,255,0.3));
 }
 
 .canvas-empty-hint .hint-title {
@@ -731,7 +728,6 @@ body {
   font-weight: 800;
   color: rgba(226,232,240,0.5);
   letter-spacing: -0.02em;
-  animation: chromaGlow 3s ease-in-out infinite;
 }
 
 .canvas-empty-hint .hint-sub {
@@ -804,7 +800,7 @@ body {
 .radial-slice:hover {
   background: rgba(255,255,255,0.13);
   transform: scale(1.14) !important;
-  filter: drop-shadow(-2px 0 rgba(255,30,80,0.4)) drop-shadow(2px 0 rgba(30,120,255,0.4));
+  filter: drop-shadow(-1px 0 rgba(255,30,80,0.18)) drop-shadow(1px 0 rgba(30,120,255,0.18));
 }
 
 .radial-slice.active {
