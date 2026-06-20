@@ -34,7 +34,7 @@ import CustomEdge from './components/CustomEdge';
 import RadialWheel from './components/RadialWheel';
 import LoginModal from './components/LoginModal';
 import type { Cocktail } from './data/cocktailDB';
-import { searchCocktails } from './services/cocktailSearch';
+import { searchCocktails, matchCocktailByIngredients } from './services/cocktailSearch';
 import { exportFlowToPdf, type ExportMode, type Orientation, type PaperSize } from './utils/exportPdf';
 import { supabase } from './services/supabaseClient';
 import { HierarchyManager } from './utils/hierarchy';
@@ -186,8 +186,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
   // --- Ingredient List Sync ---
   // Keeps each spec's ingredientsList up to date as edges change.
-  // Auto-naming via offline cocktail matching has been removed; specs use
-  // the Supabase search library instead.
   useEffect(() => {
     setNodes((currentNodes) => {
       let nodesChanged = false;
@@ -217,6 +215,46 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
       return nodesChanged ? updatedNodes : currentNodes;
     });
+  }, [edges, setNodes]);
+
+  // --- Cocktail Auto-Matcher ---
+  // Watches edges (not nodes) to avoid an infinite loop.
+  // Reads the latest nodes snapshot via a ref so we never need nodes in deps.
+  const nodesRef = useRef(nodes);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+
+  const matcherTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (matcherTimerRef.current) clearTimeout(matcherTimerRef.current);
+    matcherTimerRef.current = setTimeout(async () => {
+      const snapNodes = nodesRef.current;
+      for (const node of snapNodes) {
+        if (node.type !== 'spec' || node.data.isCustomOverride) continue;
+        const ingredientsList = (node.data.ingredientsList ?? []) as { name: string }[];
+        if (ingredientsList.length < 2) {
+          if (node.data.isMatched) {
+            setNodes(nds => nds.map(n => n.id === node.id
+              ? { ...n, data: { ...n.data, label: 'Custom Recipe', method: 'Experimenting...', glassware: 'Unknown', isMatched: false } }
+              : n
+            ));
+          }
+          continue;
+        }
+        const names = ingredientsList.map(i => i.name);
+        const match = await matchCocktailByIngredients(names);
+        setNodes(nds => nds.map(n => {
+          if (n.id !== node.id) return n;
+          if (match) {
+            return { ...n, data: { ...n.data, label: match.name, method: match.method, glassware: match.glass, isMatched: true } };
+          }
+          if (n.data.isMatched) {
+            return { ...n, data: { ...n.data, label: 'Custom Recipe', method: 'Experimenting...', glassware: 'Unknown', isMatched: false } };
+          }
+          return n;
+        }));
+      }
+    }, 800);
+    return () => { if (matcherTimerRef.current) clearTimeout(matcherTimerRef.current); };
   }, [edges, setNodes]);
 
   const onNodeDragStop = useCallback((_: any, draggedNode: Node) => {
