@@ -9,8 +9,9 @@ function rowToCocktail(row: any): Cocktail {
     keywords: row.keywords ?? [],
     description: row.description,
     standardIngredients: (row.ingredients ?? []).map((ing: any, idx: number) => ({
-      label: ing.name,
-      type: idx === 0 ? 'spirit' : 'modifier',
+      // New ingest format uses label+type; fall back to old name-only format
+      label: ing.label ?? ing.name,
+      type: ing.type ?? (idx === 0 ? 'spirit' : 'modifier'),
       amount: [ing.amount, ing.unit].filter(Boolean).join(' '),
     })),
   };
