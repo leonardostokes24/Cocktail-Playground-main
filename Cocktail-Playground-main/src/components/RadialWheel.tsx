@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Cocktail } from '../data/cocktailDB';
+import { useIngredients } from '../hooks/useIngredients';
+import { CATEGORY_TO_TYPE } from '../services/ingredientsService';
 
 interface IngredientItem {
   label: string;
@@ -11,116 +13,26 @@ interface CategoryConfig {
   label: string;
   emoji: string;
   color: string;
-  items: IngredientItem[];
 }
 
-const CATEGORIES: CategoryConfig[] = [
-  {
-    id: 'spirits', label: 'Spirits', emoji: '🥃', color: '#f59e0b',
-    items: [
-      { label: 'Bourbon', type: 'spirit' },
-      { label: 'Rye Whiskey', type: 'spirit' },
-      { label: 'Scotch', type: 'spirit' },
-      { label: 'Irish Whiskey', type: 'spirit' },
-      { label: 'London Dry Gin', type: 'spirit' },
-      { label: 'Old Tom Gin', type: 'spirit' },
-      { label: 'Vodka', type: 'spirit' },
-      { label: 'Blanco Tequila', type: 'spirit' },
-      { label: 'Reposado Tequila', type: 'spirit' },
-      { label: 'Mezcal', type: 'spirit' },
-      { label: 'Light Rum', type: 'spirit' },
-      { label: 'Dark Rum', type: 'spirit' },
-      { label: 'Overproof Rum', type: 'spirit' },
-      { label: 'Cognac', type: 'spirit' },
-      { label: 'Brandy / Pisco', type: 'spirit' },
-      { label: 'Cachaça', type: 'spirit' },
-      { label: 'Applejack', type: 'spirit' },
-    ],
-  },
-  {
-    id: 'liqueurs', label: 'Liqueurs', emoji: '🍹', color: '#fb923c',
-    items: [
-      { label: 'Triple Sec', type: 'modifier' },
-      { label: 'Curaçao', type: 'modifier' },
-      { label: 'Maraschino', type: 'modifier' },
-      { label: 'Elderflower', type: 'modifier' },
-      { label: 'Benedictine', type: 'modifier' },
-      { label: 'Drambuie', type: 'modifier' },
-      { label: 'Green Chartreuse', type: 'modifier' },
-      { label: 'Yellow Chartreuse', type: 'modifier' },
-      { label: 'Amaretto', type: 'modifier' },
-      { label: 'Coffee Liqueur', type: 'modifier' },
-      { label: 'Apricot Brandy', type: 'modifier' },
-      { label: 'Crème de Violette', type: 'modifier' },
-      { label: 'Absinthe', type: 'modifier' },
-    ],
-  },
-  {
-    id: 'vermouth', label: 'Vermouth', emoji: '🍷', color: '#dc2626',
-    items: [
-      { label: 'Sweet Vermouth', type: 'modifier' },
-      { label: 'Dry Vermouth', type: 'modifier' },
-      { label: 'Blanc Vermouth', type: 'modifier' },
-      { label: 'Fino Sherry', type: 'modifier' },
-      { label: 'Pedro Ximénez', type: 'modifier' },
-      { label: 'Lillet Blanc', type: 'modifier' },
-    ],
-  },
-  {
-    id: 'amari', label: 'Amari', emoji: '🌿', color: '#10b981',
-    items: [
-      { label: 'Campari', type: 'modifier' },
-      { label: 'Aperol', type: 'modifier' },
-      { label: 'Fernet-Branca', type: 'modifier' },
-      { label: 'Cynar', type: 'modifier' },
-      { label: 'Averna', type: 'modifier' },
-      { label: 'Suze', type: 'modifier' },
-      { label: 'Montenegro', type: 'modifier' },
-    ],
-  },
-  {
-    id: 'citrus', label: 'Citrus', emoji: '🍋', color: '#facc15',
-    items: [
-      { label: 'Lemon Juice', type: 'citrus' },
-      { label: 'Lime Juice', type: 'citrus' },
-      { label: 'Orange Juice', type: 'citrus' },
-      { label: 'Grapefruit', type: 'citrus' },
-      { label: 'Pineapple', type: 'citrus' },
-      { label: 'Cranberry', type: 'citrus' },
-    ],
-  },
-  {
-    id: 'sweeteners', label: 'Sweeteners', emoji: '🍬', color: '#fbbf24',
-    items: [
-      { label: 'Simple Syrup', type: 'sweetener' },
-      { label: 'Rich Simple', type: 'sweetener' },
-      { label: 'Demerara Syrup', type: 'sweetener' },
-      { label: 'Honey Syrup', type: 'sweetener' },
-      { label: 'Agave Nectar', type: 'sweetener' },
-      { label: 'Orgeat', type: 'sweetener' },
-      { label: 'Grenadine', type: 'sweetener' },
-      { label: 'Maple Syrup', type: 'sweetener' },
-    ],
-  },
-  {
-    id: 'bitters', label: 'Bitters', emoji: '💧', color: '#b45309',
-    items: [
-      { label: 'Aromatic Bitters', type: 'bitters' },
-      { label: "Peychaud's", type: 'bitters' },
-      { label: 'Orange Bitters', type: 'bitters' },
-      { label: 'Chocolate Bitters', type: 'bitters' },
-      { label: 'Celery Bitters', type: 'bitters' },
-    ],
-  },
-  {
-    id: 'formulas', label: 'Formulas', emoji: '📋', color: '#3b82f6',
-    items: [
-      { label: 'The Sour', type: 'formula' },
-      { label: 'Spirit-Forward', type: 'formula' },
-      { label: 'Highball', type: 'formula' },
-      { label: 'Negroni Style', type: 'formula' },
-    ],
-  },
+// Visual config for each wheel slice — items are populated from the DB at runtime
+const WHEEL_CONFIG: CategoryConfig[] = [
+  { id: 'spirits',    label: 'Spirits',    emoji: '🥃', color: '#f59e0b' },
+  { id: 'liqueurs',   label: 'Liqueurs',   emoji: '🍹', color: '#fb923c' },
+  { id: 'vermouth',   label: 'Vermouth',   emoji: '🍷', color: '#dc2626' },
+  { id: 'amari',      label: 'Amari',      emoji: '🌿', color: '#10b981' },
+  { id: 'citrus',     label: 'Citrus',     emoji: '🍋', color: '#facc15' },
+  { id: 'sweeteners', label: 'Sweeteners', emoji: '🍬', color: '#fbbf24' },
+  { id: 'bitters',    label: 'Bitters',    emoji: '💧', color: '#b45309' },
+  { id: 'formulas',   label: 'Formulas',   emoji: '📋', color: '#3b82f6' },
+];
+
+// Formulas are not ingredients — always hardcoded
+const FORMULA_ITEMS: IngredientItem[] = [
+  { label: 'The Sour',       type: 'formula' },
+  { label: 'Spirit-Forward', type: 'formula' },
+  { label: 'Highball',       type: 'formula' },
+  { label: 'Negroni Style',  type: 'formula' },
 ];
 
 const RADIUS = 96;
@@ -167,13 +79,23 @@ export default function RadialWheel({
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [searchQuery, onSearchCocktails]);
 
+  const { ingredients } = useIngredients();
+
   const flyoutOnLeft = x > window.innerWidth / 2;
   const flyoutLeft = flyoutOnLeft
     ? x - RADIUS - SLICE_SIZE / 2 - 14 - FLYOUT_WIDTH
     : x + RADIUS + SLICE_SIZE / 2 + 14;
   const flyoutTop = Math.min(Math.max(16, y - 120), window.innerHeight - 380);
 
-  const activeCat = CATEGORIES.find(c => c.id === activeCategory);
+  const activeCat = WHEEL_CONFIG.find(c => c.id === activeCategory);
+
+  // Items for the active category flyout
+  const activeCatItems: IngredientItem[] = activeCategory === 'formulas'
+    ? FORMULA_ITEMS
+    : (ingredients[activeCategory ?? ''] ?? []).map(ing => ({
+        label: ing.label,
+        type: CATEGORY_TO_TYPE[ing.category] ?? 'modifier',
+      }));
 
   const handleCategoryClick = (catId: string) => {
     setShowRecipeSearch(false);
@@ -200,8 +122,8 @@ export default function RadialWheel({
         style={{ left: x, top: y }}
         onClick={(e) => e.stopPropagation()}
       >
-        {CATEGORIES.map((cat, i) => {
-          const angle = (i / CATEGORIES.length) * 2 * Math.PI - Math.PI / 2;
+        {WHEEL_CONFIG.map((cat, i) => {
+          const angle = (i / WHEEL_CONFIG.length) * 2 * Math.PI - Math.PI / 2;
           const cx = Math.cos(angle) * RADIUS;
           const cy = Math.sin(angle) * RADIUS;
           const isActive = activeCategory === cat.id;
@@ -268,7 +190,12 @@ export default function RadialWheel({
               <div className="radial-flyout-header" style={{ color: activeCat.color }}>
                 {activeCat.emoji} {activeCat.label}
               </div>
-              {activeCat.items.map((item) => (
+              {activeCatItems.length === 0 && (
+                <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '12px 0', margin: 0 }}>
+                  No ingredients yet
+                </p>
+              )}
+              {activeCatItems.map((item) => (
                 <button
                   key={item.label}
                   className="radial-flyout-item"

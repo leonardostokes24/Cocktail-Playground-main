@@ -37,11 +37,11 @@ if (!pdfPath || !source) {
   process.exit(1);
 }
 
-// ---------- app ingredient list ----------
-// These are the canonical labels the app knows about, grouped by type.
-// Gemini maps each extracted ingredient to the closest entry here, or flags it as new.
+// ---------- app ingredient catalogue ----------
+// Gemini maps each extracted ingredient to the closest entry here.
+// category must be one of the 7 values the DB accepts.
 const KNOWN_INGREDIENTS = {
-  spirit: [
+  spirits: [
     "Bourbon", "Rye Whiskey", "Scotch", "Irish Whiskey",
     "London Dry Gin", "Old Tom Gin",
     "Vodka",
@@ -49,21 +49,22 @@ const KNOWN_INGREDIENTS = {
     "Light Rum", "Dark Rum", "Overproof Rum",
     "Cognac", "Brandy / Pisco", "Cachaça", "Applejack",
   ],
-  modifier: [
-    // liqueurs
+  liqueurs: [
     "Triple Sec", "Curaçao", "Maraschino", "Elderflower", "Benedictine", "Drambuie",
     "Green Chartreuse", "Yellow Chartreuse", "Amaretto", "Coffee Liqueur",
     "Apricot Brandy", "Crème de Violette", "Absinthe",
-    // vermouth & fortified
+  ],
+  vermouth: [
     "Sweet Vermouth", "Dry Vermouth", "Blanc Vermouth",
     "Fino Sherry", "Pedro Ximénez", "Lillet Blanc",
-    // amari & aperitifs
+  ],
+  amari: [
     "Campari", "Aperol", "Fernet-Branca", "Cynar", "Averna", "Suze", "Montenegro",
   ],
   citrus: [
     "Lemon Juice", "Lime Juice", "Orange Juice", "Grapefruit", "Pineapple", "Cranberry",
   ],
-  sweetener: [
+  sweeteners: [
     "Simple Syrup", "Rich Simple", "Demerara Syrup", "Honey Syrup",
     "Agave Nectar", "Orgeat", "Grenadine", "Maple Syrup",
   ],
@@ -72,9 +73,15 @@ const KNOWN_INGREDIENTS = {
   ],
 };
 
+// Default emoji per category for new ingredients added to the pool
+const CATEGORY_EMOJI = {
+  spirits: "🍶", liqueurs: "🍹", vermouth: "🍷",
+  amari: "🌿", citrus: "🍊", sweeteners: "🍯", bitters: "💧",
+};
+
 // Flat list used in the prompt so Gemini sees the full catalogue
 const INGREDIENT_LIST_TEXT = Object.entries(KNOWN_INGREDIENTS)
-  .map(([type, labels]) => `${type.toUpperCase()}:\n${labels.map(l => `  - ${l}`).join("\n")}`)
+  .map(([cat, labels]) => `${cat.toUpperCase()}:\n${labels.map(l => `  - ${l}`).join("\n")}`)
   .join("\n\n");
 
 // ---------- clients ----------
@@ -119,24 +126,25 @@ Return ONLY a JSON array. Each element:
   "keywords": string[],
   "ingredients": [
     {
-      "label": string,       // canonical app label (see the list below — pick the CLOSEST match)
-      "type": string,        // must be one of: spirit | modifier | citrus | sweetener | bitters
+      "label": string,       // canonical app label (see catalogue below — pick the CLOSEST match)
+      "category": string,    // must be one of: spirits | liqueurs | vermouth | amari | citrus | sweeteners | bitters
       "amount": number|null,
       "unit": string|null,   // ml | oz | dash | barspoon | drop | tsp | cl | part
-      "isNew": boolean       // true ONLY if no reasonable match exists in the list
+      "isNew": boolean       // true ONLY if no reasonable match exists in the catalogue
     }
   ]
 }
 
 INGREDIENT MAPPING RULES:
 - Match each extracted ingredient to the CLOSEST label in the catalogue below.
-- Use partial/semantic matching: "Sweet Red Vermouth" → "Sweet Vermouth", "Bitter Campari" → "Campari",
-  "Gin" → "London Dry Gin" (assume London Dry unless the recipe says otherwise),
-  "Angostura Bitters" → "Aromatic Bitters", "Grapefruit Juice" → "Grapefruit",
-  "Fresh Lemon" → "Lemon Juice", "Egg White" → label "Egg White", type "modifier", isNew: true.
-- Set isNew: false whenever you use a catalogue label exactly.
-- Set isNew: true only when the ingredient genuinely doesn't fit any catalogue entry.
-  In that case, pick the most descriptive label (e.g. "Coconut Cream") and the right type.
+- Use partial/semantic matching: "Sweet Red Vermouth" → "Sweet Vermouth" (vermouth),
+  "Bitter Campari" → "Campari" (amari), "Gin" → "London Dry Gin" (spirits, assume London Dry
+  unless the recipe specifies otherwise), "Angostura Bitters" → "Aromatic Bitters" (bitters),
+  "Grapefruit Juice" → "Grapefruit" (citrus), "Fresh Lemon" → "Lemon Juice" (citrus).
+- Set isNew: false when you use a catalogue label exactly.
+- Set isNew: true only when the ingredient genuinely doesn't fit any catalogue entry (e.g. "Egg
+  White", "Coconut Cream", "Blue Curaçao"). Give it the most descriptive label possible and pick
+  the best-fitting category.
 - Keep keywords genuinely descriptive of taste/style (4–8 tags like "smoky","citrus-forward").
 - Skip incomplete recipes (cut off at a page edge). Never invent recipes.
 
@@ -183,6 +191,16 @@ async function insertCocktail(r) {
   if (error) throw error;
 }
 
+async function upsertNewIngredient(label, category) {
+  const emoji = CATEGORY_EMOJI[category] ?? "🍹";
+  const { error } = await supabase.from("ingredients").upsert(
+    { label, category, emoji, color: "text-slate-300" },
+    { onConflict: "label" }
+  );
+  if (error) console.warn(`  Could not add ingredient "${label}": ${error.message}`);
+  else console.log(`  + added ingredient: ${category.padEnd(12)} ${label}`);
+}
+
 // ---------- main ----------
 async function main() {
   console.log(`Reading ${pdfPath} ...`);
@@ -205,20 +223,20 @@ async function main() {
   console.log(`\nParsed ${recipes.length} unique recipe(s):\n`);
   console.log(JSON.stringify(recipes, null, 2));
 
-  // Summarise any new ingredients that aren't in the app yet
+  // Collect new ingredients flagged by Gemini
   const newIngredients = new Map();
   for (const r of recipes) {
     for (const ing of r.ingredients ?? []) {
       if (ing.isNew) {
-        const key = `${ing.label}|${ing.type}`;
-        if (!newIngredients.has(key)) newIngredients.set(key, { label: ing.label, type: ing.type });
+        const key = `${ing.label}|${ing.category}`;
+        if (!newIngredients.has(key)) newIngredients.set(key, { label: ing.label, category: ing.category ?? 'liqueurs' });
       }
     }
   }
   if (newIngredients.size > 0) {
-    console.log(`\n⚠  NEW INGREDIENTS (not in the app's list — add to Sidebar / RadialWheel if wanted):`);
-    for (const { label, type } of newIngredients.values()) {
-      console.log(`   ${type.padEnd(10)} ${label}`);
+    console.log(`\n⚠  NEW INGREDIENTS (will be added to the ingredient pool on --commit):`);
+    for (const { label, category } of newIngredients.values()) {
+      console.log(`   ${(category ?? '').padEnd(12)} ${label}`);
     }
   } else {
     console.log(`\n✓  All ingredients matched the app's catalogue — no new items needed.`);
@@ -229,6 +247,15 @@ async function main() {
     return;
   }
 
+  // 1. Add new ingredients to the pool
+  if (newIngredients.size > 0) {
+    console.log(`\nAdding ${newIngredients.size} new ingredient(s) to the pool ...`);
+    for (const { label, category } of newIngredients.values()) {
+      await upsertNewIngredient(label, category);
+    }
+  }
+
+  // 2. Insert cocktail recipes
   console.log(`\nWriting to the cocktails library ...`);
   let ok = 0;
   for (const r of recipes) {

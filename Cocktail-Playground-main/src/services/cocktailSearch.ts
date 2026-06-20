@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import type { Cocktail } from '../data/cocktailDB';
+import { CATEGORY_TO_TYPE } from './ingredientsService';
 
 function rowToCocktail(row: any): Cocktail {
   return {
@@ -9,9 +10,11 @@ function rowToCocktail(row: any): Cocktail {
     keywords: row.keywords ?? [],
     description: row.description,
     standardIngredients: (row.ingredients ?? []).map((ing: any, idx: number) => ({
-      // New ingest format uses label+type; fall back to old name-only format
       label: ing.label ?? ing.name,
-      type: ing.type ?? (idx === 0 ? 'spirit' : 'modifier'),
+      // New format stores category; old format stores type; oldest has neither
+      type: ing.type
+        ?? (ing.category ? CATEGORY_TO_TYPE[ing.category] : undefined)
+        ?? (idx === 0 ? 'spirit' : 'modifier'),
       amount: [ing.amount, ing.unit].filter(Boolean).join(' '),
     })),
   };
