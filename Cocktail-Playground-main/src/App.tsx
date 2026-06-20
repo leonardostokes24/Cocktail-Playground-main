@@ -33,7 +33,8 @@ import ContainerNode from './components/ContainerNode';
 import CustomEdge from './components/CustomEdge';
 import RadialWheel from './components/RadialWheel';
 import LoginModal from './components/LoginModal';
-import { findCocktailMatch, ibaCocktails, type Cocktail } from './data/cocktailDB';
+import type { Cocktail } from './data/cocktailDB';
+import { searchCocktails } from './services/cocktailSearch';
 import { exportFlowToPdf, type ExportMode, type Orientation, type PaperSize } from './utils/exportPdf';
 import { supabase } from './services/supabaseClient';
 import { HierarchyManager } from './utils/hierarchy';
@@ -183,7 +184,10 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   // --- Radial Wheel ---
   const [radialPos, setRadialPos] = useState<{ x: number; y: number } | null>(null);
 
-  // --- Auto-Matcher & Recipe List Sync ---
+  // --- Ingredient List Sync ---
+  // Keeps each spec's ingredientsList up to date as edges change.
+  // Auto-naming via offline cocktail matching has been removed; specs use
+  // the Supabase search library instead.
   useEffect(() => {
     setNodes((currentNodes) => {
       let nodesChanged = false;
@@ -193,7 +197,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
         const incomingEdges = edges.filter(e => e.target === node.id);
 
-        // 1. Compile ingredients list for display
         const ingredientsList = incomingEdges.map(edge => {
           const sourceNode = currentNodes.find(n => n.id === edge.source);
           if (sourceNode && sourceNode.type === 'ingredient') {
@@ -202,54 +205,18 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
           return null;
         }).filter((i): i is { name: string; amount: string } => i !== null);
 
-        // 2. Check for changes to avoid loops
         const currentListStr = JSON.stringify(node.data.ingredientsList || []);
         const newListStr = JSON.stringify(ingredientsList);
-        const listChanged = currentListStr !== newListStr;
 
-        let newLabel = (node.data.label as string) || 'Custom Recipe';
-        let newMethod = (node.data.method as string) || 'Experimenting...';
-        let newGlass = (node.data.glassware as string) || 'Unknown';
-        let newIsMatched = !!node.data.isMatched;
-
-        // 3. Match IBA cocktails if not overridden
-        if (!node.data.isCustomOverride) {
-          const match = findCocktailMatch(ingredientsList.map(i => i.name));
-          if (match) {
-            newLabel = match.name;
-            newMethod = match.method;
-            newGlass = match.glass;
-            newIsMatched = true;
-          } else {
-            newLabel = 'Custom Recipe';
-            newMethod = 'Experimenting...';
-            newGlass = 'Unknown';
-            newIsMatched = false;
-          }
-        }
-
-        if (listChanged || node.data.label !== newLabel || node.data.isMatched !== newIsMatched) {
+        if (currentListStr !== newListStr) {
           nodesChanged = true;
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              label: newLabel,
-              method: newMethod,
-              glassware: newGlass,
-              isMatched: newIsMatched,
-              ingredientsList: ingredientsList
-            }
-          };
+          return { ...node, data: { ...node.data, ingredientsList } };
         }
         return node;
       });
 
       return nodesChanged ? updatedNodes : currentNodes;
     });
-  // Only re-run when edges change. currentNodes is always fresh inside
-  // the setNodes updater callback, so removing `nodes` from deps here
-  // is safe and breaks the circular update loop.
   }, [edges, setNodes]);
 
   const onNodeDragStop = useCallback((_: any, draggedNode: Node) => {
@@ -1061,7 +1028,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
           onCreateContainer={handleCreateContainer}
           onExpandFormula={handleExpandFormula}
           onExpandRecipe={handleExpandRecipe}
-          ibaCocktails={ibaCocktails}
+          onSearchCocktails={searchCocktails}
         />
       )}
     </div>

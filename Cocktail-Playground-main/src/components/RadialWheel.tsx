@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Cocktail } from '../data/cocktailDB';
 
 interface IngredientItem {
@@ -136,21 +136,36 @@ interface RadialWheelProps {
   onCreateContainer: () => void;
   onExpandFormula: (label: string) => void;
   onExpandRecipe: (recipe: Cocktail) => void;
-  ibaCocktails: Cocktail[];
+  onSearchCocktails: (q: string) => Promise<Cocktail[]>;
 }
 
 export default function RadialWheel({
-  x, y, onClose, onCreateIngredient, onCreateSpec, onCreateContainer, onExpandFormula, onExpandRecipe, ibaCocktails,
+  x, y, onClose, onCreateIngredient, onCreateSpec, onCreateContainer, onExpandFormula, onExpandRecipe, onSearchCocktails,
 }: RadialWheelProps) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [showRecipeSearch, setShowRecipeSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Cocktail[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!searchQuery.trim()) { setSearchResults([]); setIsSearching(false); return; }
+    setIsSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      const results = await onSearchCocktails(searchQuery);
+      setSearchResults(results);
+      setIsSearching(false);
+    }, 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery, onSearchCocktails]);
 
   const flyoutOnLeft = x > window.innerWidth / 2;
   const flyoutLeft = flyoutOnLeft
@@ -159,9 +174,6 @@ export default function RadialWheel({
   const flyoutTop = Math.min(Math.max(16, y - 120), window.innerHeight - 380);
 
   const activeCat = CATEGORIES.find(c => c.id === activeCategory);
-  const filteredRecipes = ibaCocktails.filter(r =>
-    r.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   const handleCategoryClick = (catId: string) => {
     setShowRecipeSearch(false);
@@ -277,7 +289,7 @@ export default function RadialWheel({
 
           {showRecipeSearch && (
             <>
-              <div className="radial-flyout-header">📚 IBA Library</div>
+              <div className="radial-flyout-header">📚 Recipe Library</div>
               <input
                 autoFocus
                 className="radial-search-input"
@@ -286,12 +298,20 @@ export default function RadialWheel({
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
               <div style={{ overflowY: 'auto', maxHeight: 260 }}>
-                {filteredRecipes.length === 0 ? (
+                {isSearching ? (
+                  <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '12px 0', margin: 0 }}>
+                    Searching…
+                  </p>
+                ) : !searchQuery.trim() ? (
+                  <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '12px 0', margin: 0 }}>
+                    Type to search the library
+                  </p>
+                ) : searchResults.length === 0 ? (
                   <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '12px 0', margin: 0 }}>
                     No matches
                   </p>
                 ) : (
-                  filteredRecipes.map((recipe) => (
+                  searchResults.map((recipe) => (
                     <button
                       key={recipe.name}
                       className="radial-flyout-item"

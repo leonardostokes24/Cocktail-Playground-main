@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus } from 'lucide-react';
-import { ibaCocktails } from '../data/cocktailDB';
 import { supabase } from '../services/supabaseClient';
 
 export default function Sidebar({ type, isOpen, user, onTabChange }: { type: 'builder' | 'library', isOpen: boolean, user: any, onTabChange: (type: 'builder' | 'library') => void }) {
@@ -90,15 +89,11 @@ export default function Sidebar({ type, isOpen, user, onTabChange }: { type: 'bu
     event.dataTransfer.effectAllowed = 'move';
   };
 
-  const filteredRecipes = ibaCocktails.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase())
-  );
-
   return (
     <aside className={`sidebar ${type === 'builder' ? 'left' : 'right'} ${!isOpen ? 'collapsed' : ''}`}>
       <div className="sidebar-logo">
         <div className="logo-box">{type === 'builder' ? 'B' : 'L'}</div>
-        <h1 className="text-xl font-bold tracking-tight text-white">{type === 'builder' ? 'Builder' : 'IBA Library'}</h1>
+        <h1 className="text-xl font-bold tracking-tight text-white">{type === 'builder' ? 'Builder' : 'My Recipes'}</h1>
       </div>
       
       <div style={{ marginBottom: '16px' }}>
@@ -228,40 +223,27 @@ export default function Sidebar({ type, isOpen, user, onTabChange }: { type: 'bu
           </>
         ) : (
           <section>
-            <h3 className="section-title">Full Recipe Nodes</h3>
+            <h3 className="section-title">Saved Recipes</h3>
             <div className="flex flex-col gap-2">
-          {ibaCocktails
-            .filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
-            .map((recipe, idx) => (
-              <div 
-                key={`iba-${idx}`} 
-                className="dnd-node" 
-                style={{ background: '#052c21', border: '1px solid #064e3b' }} 
-                draggable 
-                onDragStart={(e) => onDragStart(e, 'recipe', recipe.name, 'spec', { recipe })}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📑 <span>{recipe.name}</span></span>
-              </div>
-            ))
-          }
-          {customRecipes
-            .filter(r => r.name.toLowerCase().includes(search.toLowerCase()))
-            .map((recipe, idx) => (
-              <div 
-                key={`custom-${idx}`} 
-                className="dnd-node" 
-                style={{ background: '#1e3a8a', border: '1px solid #1e40af' }} 
-                draggable 
-                onDragStart={(e) => onDragStart(e, 'recipe', recipe.name, 'spec', { recipe })}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⭐ <span>{recipe.name}</span></span>
-              </div>
-            ))
-          }
-          {ibaCocktails.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).length === 0 && customRecipes.filter(r => r.name.toLowerCase().includes(search.toLowerCase())).length === 0 && (
-            <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', marginTop: '20px' }}>No matches found</p>
-          )}
-
+              {customRecipes
+                .filter(r => r.name.toLowerCase().includes(search.toLowerCase()))
+                .map((recipe, idx) => (
+                  <div
+                    key={`custom-${idx}`}
+                    className="dnd-node"
+                    style={{ background: '#1e3a8a', border: '1px solid #1e40af' }}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, 'recipe', recipe.name, 'spec', { recipe })}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⭐ <span>{recipe.name}</span></span>
+                  </div>
+                ))
+              }
+              {customRecipes.filter(r => r.name.toLowerCase().includes(search.toLowerCase())).length === 0 && (
+                <p style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', marginTop: '20px' }}>
+                  {customRecipes.length === 0 ? 'Save a spec to see it here' : 'No matches found'}
+                </p>
+              )}
             </div>
           </section>
         )}
