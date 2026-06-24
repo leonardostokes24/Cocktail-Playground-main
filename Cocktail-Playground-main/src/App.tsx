@@ -166,6 +166,57 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   // Memoize sorted nodes so the O(n log n) sort isn't repeated on every render.
   const sortedNodes = useMemo(() => sortNodesByHierarchy(nodes), [nodes]);
 
+  // Selected containers — used to show the merge panel.
+  const selectedContainers = useMemo(
+    () => nodes.filter(n => n.selected && n.type === 'container'),
+    [nodes]
+  );
+
+  const mergeGroups = useCallback((idA: string, idB: string) => {
+    setNodes(nds => {
+      const a = nds.find(n => n.id === idA);
+      const b = nds.find(n => n.id === idB);
+      if (!a || !b) return nds;
+
+      const aAbs = HierarchyManager.getAbsolutePosition(a, nds);
+      const bAbs = HierarchyManager.getAbsolutePosition(b, nds);
+      const aW = (a.style?.width as number) || 300;
+      const aH = (a.style?.height as number) || 200;
+      const bW = (b.style?.width as number) || 300;
+      const bH = (b.style?.height as number) || 200;
+
+      const minX = Math.min(aAbs.x, bAbs.x) - 24;
+      const minY = Math.min(aAbs.y, bAbs.y) - 24;
+      const maxX = Math.max(aAbs.x + aW, bAbs.x + bW) + 24;
+      const maxY = Math.max(aAbs.y + aH, bAbs.y + bH) + 24;
+
+      return nds
+        .filter(n => n.id !== idB)
+        .map(n => {
+          if (n.id === idA) {
+            return {
+              ...n,
+              position: { x: minX, y: minY },
+              parentId: undefined,
+              extent: undefined,
+              style: { ...n.style, width: maxX - minX, height: maxY - minY },
+              data: { ...n.data, isSpecGroup: false },
+              selected: false,
+            };
+          }
+          if (n.parentId === idA) {
+            const childAbs = HierarchyManager.getAbsolutePosition(n, nds);
+            return { ...n, position: { x: childAbs.x - minX, y: childAbs.y - minY }, selected: false };
+          }
+          if (n.parentId === idB) {
+            const childAbs = HierarchyManager.getAbsolutePosition(n, nds);
+            return { ...n, parentId: idA, position: { x: childAbs.x - minX, y: childAbs.y - minY }, selected: false };
+          }
+          return { ...n, selected: false };
+        });
+    });
+  }, [setNodes]);
+
   // --- Modal States ---
   const [modalConfig, setModalConfig] = useState<{
     type: 'amount' | 'twist' | 'edit-edge';
@@ -560,9 +611,12 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   // Resolves whether a flow position falls inside a container and returns
   // the parentId + position relative to that container if so.
   const resolveContainer = useCallback(
-    (flowPos: { x: number; y: number }, nds: Node[]) => {
+    (flowPos: { x: number; y: number }, nds: Node[], excludeSpecGroups = false) => {
+      const candidates = nds.filter(n =>
+        n.type === 'container' && (!excludeSpecGroups || !n.data?.isSpecGroup)
+      );
       const container = HierarchyManager.pickContainingNode(
-        nds.filter(n => n.type === 'container'),
+        candidates,
         flowPos,
         nds,
         { width: 300, height: 300 }
@@ -595,15 +649,28 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   const handleCreateSpec = useCallback(() => {
     if (!radialPos) return;
     const flowPos = screenToFlowPosition(radialPos);
+    const specId = getId();
+    const groupId = getId();
     setNodes((nds) => {
-      const { parentId, resolvedPos } = resolveContainer(flowPos, nds);
-      return [...nds, {
-        id: getId(), type: 'spec',
-        position: resolvedPos,
-        parentId,
-        extent: parentId ? 'parent' : undefined,
+      const { parentId: outerParentId, resolvedPos } = resolveContainer(flowPos, nds, true);
+      const groupNode: Node = {
+        id: groupId,
+        type: 'container',
+        position: { x: resolvedPos.x - 24, y: resolvedPos.y - 48 },
+        parentId: outerParentId,
+        extent: outerParentId ? 'parent' : undefined,
+        style: { width: 300, height: 200 },
+        data: { label: 'Spec Group', isSpecGroup: true },
+      };
+      const specNode: Node = {
+        id: specId,
+        type: 'spec',
+        position: { x: 24, y: 48 },
+        parentId: groupId,
+        extent: 'parent',
         data: { label: 'Custom Recipe', method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] },
-      } as Node];
+      };
+      return [...nds, groupNode, specNode];
     });
   }, [radialPos, screenToFlowPosition, setNodes, resolveContainer]);
 
@@ -625,11 +692,25 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     const config = FORMULA_STRUCTURES[label];
     if (!config) return;
     const specId = getId();
+    const groupId = getId();
     setNodes((nds) => {
-      const { parentId, resolvedPos } = resolveContainer(flowPos, nds);
+      const { parentId: outerParentId, resolvedPos } = resolveContainer(flowPos, nds, true);
       const clusterNodes: Node[] = [
-        { id: specId, type: 'spec', position: resolvedPos, parentId, extent: parentId ? 'parent' : undefined,
-          data: { label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] } }
+        {
+          id: groupId, type: 'container',
+          position: { x: resolvedPos.x - 24, y: resolvedPos.y - 48 },
+          parentId: outerParentId,
+          extent: outerParentId ? 'parent' : undefined,
+          style: { width: 300, height: 200 },
+          data: { label, isSpecGroup: true },
+        },
+        {
+          id: specId, type: 'spec',
+          position: { x: 24, y: 48 },
+          parentId: groupId,
+          extent: 'parent',
+          data: { label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] },
+        },
       ];
       config.ingredients.forEach((ing, idx) => {
         const ingId = getId();
@@ -643,7 +724,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       setEdges((eds) => [
         ...eds,
         ...config.ingredients.map((ing, idx) => {
-          const ingId = clusterNodes[idx + 1].id;
+          const ingId = clusterNodes[idx + 2].id;
           return { id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: true };
         }),
       ]);
@@ -655,13 +736,27 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     if (!radialPos) return;
     const flowPos = screenToFlowPosition(radialPos);
     const specId = getId();
+    const groupId = getId();
     setNodes((nds) => {
-      const { parentId, resolvedPos } = resolveContainer(flowPos, nds);
-      const clusterNodes: Node[] = [
-        { id: specId, type: 'spec', position: resolvedPos, parentId, extent: parentId ? 'parent' : undefined,
-          data: { label: recipe.name, method: recipe.method, glassware: recipe.glass, isMatched: true, isCustomOverride: false, ingredientsList: [] } }
-      ];
+      const { parentId: outerParentId, resolvedPos } = resolveContainer(flowPos, nds, true);
       const ings = recipe.standardIngredients ?? [];
+      const clusterNodes: Node[] = [
+        {
+          id: groupId, type: 'container',
+          position: { x: resolvedPos.x - 24, y: resolvedPos.y - 48 },
+          parentId: outerParentId,
+          extent: outerParentId ? 'parent' : undefined,
+          style: { width: 300, height: 200 },
+          data: { label: recipe.name, isSpecGroup: true },
+        },
+        {
+          id: specId, type: 'spec',
+          position: { x: 24, y: 48 },
+          parentId: groupId,
+          extent: 'parent',
+          data: { label: recipe.name, method: recipe.method, glassware: recipe.glass, isMatched: true, isCustomOverride: false, ingredientsList: [] },
+        },
+      ];
       ings.forEach((ing, idx) => {
         const ingId = getId();
         clusterNodes.push({
@@ -674,7 +769,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
       setEdges((eds) => [
         ...eds,
         ...ings.map((ing, idx) => {
-          const ingId = clusterNodes[idx + 1].id;
+          const ingId = clusterNodes[idx + 2].id;
           return { id: `edge_${ingId}_${specId}`, source: ingId, target: specId, label: ing.amount, animated: false };
         }),
       ]);
@@ -753,6 +848,30 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
           <div className="hint-icon">🍹</div>
           <div className="hint-title">Build Your First Spec</div>
           <div className="hint-sub">Right-click canvas · long-press on mobile · or tap +</div>
+        </div>
+      )}
+
+      {/* Merge panel — shown when exactly 2 containers are selected */}
+      {selectedContainers.length === 2 && (
+        <div style={{
+          position: 'fixed',
+          bottom: '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#0f172a',
+          border: '1px solid rgba(16,185,129,0.5)',
+          borderRadius: '10px',
+          padding: '8px 16px',
+          display: 'flex',
+          gap: '10px',
+          alignItems: 'center',
+          zIndex: 50,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+        }}>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>2 groups selected</span>
+          <Button size="sm" onClick={() => mergeGroups(selectedContainers[0].id, selectedContainers[1].id)}>
+            Merge Groups
+          </Button>
         </div>
       )}
 

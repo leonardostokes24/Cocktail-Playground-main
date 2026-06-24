@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
 export default function SpecNode({ id, data, selected }: any) {
-  const { setNodes, getNodes, getEdges } = useReactFlow();
+  const { setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(data.label);
   const [isSaving, setIsSaving] = useState(false);
@@ -100,11 +100,24 @@ export default function SpecNode({ id, data, selected }: any) {
 
   const toggleLock = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setNodes((nds) => 
-      nds.map((node) => 
+    setNodes((nds) =>
+      nds.map((node) =>
         node.id === id ? { ...node, data: { ...node.data, isLocked: !isLockedNode } } : node
       )
     );
+  };
+
+  const toggleIngredients = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nowCollapsed = !data.ingredientsCollapsed;
+    const allEdges = getEdges();
+    const ingredientIds = new Set(allEdges.filter(ed => ed.target === id).map(ed => ed.source));
+    setNodes(nds => nds.map(n => {
+      if (n.id === id) return { ...n, data: { ...n.data, ingredientsCollapsed: nowCollapsed } };
+      if (ingredientIds.has(n.id)) return { ...n, hidden: nowCollapsed };
+      return n;
+    }));
+    setEdges(eds => eds.map(e => e.target === id ? { ...e, hidden: nowCollapsed } : e));
   };
 
   const flashStatus = (status: 'saved' | 'error', msg: string) => {
@@ -176,6 +189,16 @@ export default function SpecNode({ id, data, selected }: any) {
     >
       {/* Action Buttons */}
       <div className="no-export" style={{ position: 'absolute', top: '-14px', right: '-10px', display: 'flex', gap: '5px', zIndex: 10 }}>
+        <Button
+          size="icon-xs"
+          variant={data.ingredientsCollapsed ? 'secondary' : 'ghost'}
+          onClick={toggleIngredients}
+          title={data.ingredientsCollapsed ? 'Show ingredient nodes' : 'Hide ingredient nodes'}
+          className="rounded-full shadow-md"
+        >
+          {data.ingredientsCollapsed ? '🙈' : '👁'}
+        </Button>
+
         <Button
           size="icon-xs"
           variant={isLockedNode ? 'default' : 'secondary'}
@@ -274,6 +297,11 @@ export default function SpecNode({ id, data, selected }: any) {
       </div>
 
        <div style={{ background: 'rgba(0,0,0,0.22)', borderRadius: '10px', padding: '12px', marginTop: '12px', border: '1px solid rgba(255,255,255,0.07)' }}>
+         {data.ingredientsCollapsed && data.ingredientsList?.length > 0 && (
+           <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', marginBottom: '6px', letterSpacing: '0.04em' }}>
+             🙈 nodes hidden
+           </div>
+         )}
          {(!data.ingredientsList || data.ingredientsList.length === 0) ? (
            <div style={{ fontSize: '12px', color: '#475569', fontStyle: 'italic' }}>Connect ingredients on canvas...</div>
          ) : (
