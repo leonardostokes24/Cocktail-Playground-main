@@ -53,12 +53,12 @@ export default function ContainerNode({ id, data, selected }: any) {
         const newGroupId = `specgroup-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const ingChildren = nds.filter(n => n.parentId === spec.id);
 
-        // Container sized to hold the spec comfortably
+        // Container sized to hold the spec comfortably (mirrors computeSpecGroupLayout(0))
         newNodes.push({
           id: newGroupId,
           type: 'container',
           position: { x: specAbs.x - 24, y: specAbs.y - 48 },
-          style: { width: 360, height: 300 },
+          style: { width: 380, height: 420 },
           data: { label: (spec.data.label as string) || 'Spec Group', isSpecGroup: true },
         } as Node);
 

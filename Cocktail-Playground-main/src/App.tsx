@@ -68,8 +68,10 @@ const getId = () => `node_${idCounter++}_${Date.now()}`;
 // it expands so ingredient nodes (at x = -300 relative to spec) fit inside.
 function computeSpecGroupLayout(nIngredients: number) {
   if (nIngredients === 0) {
-    // 360 × 300 is large enough for a fully-populated spec card
-    return { specX: 24, specY: 48, width: 360, height: 300 };
+    // 380 × 420 — spec card with pricing/GP rows is ~270px tall; this gives
+    // comfortable margins and room for a few extra ingredient rows before the
+    // user needs to resize the container manually with NodeResizer.
+    return { specX: 24, specY: 48, width: 380, height: 420 };
   }
   // Ingredients are positioned at y = (idx*100) - (n*100/2) + 100 relative to spec.
   const topIngY    = -(nIngredients * 100 / 2) + 100;
@@ -387,9 +389,16 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         });
       }
 
-      // Dropped outside — unparent if needed
+      // Dropped outside all containers/specs — handle unparenting
       if (draggedNode.parentId) {
         const currentParent = nds.find(n => n.id === draggedNode.parentId);
+
+        // Never unparent a node from a container via drag alone.
+        // Containers use explicit delete / unmerge / NodeResizer to manage children.
+        // Without this guard, dragging a spec even slightly outside the container
+        // frame would sever the parent-child link and break "move together" behaviour.
+        if (currentParent?.type === 'container') return nds;
+
         const isLockedSpec = currentParent?.type === 'spec' && (currentParent.data?.isLocked !== false);
         if (isLockedSpec) {
           const isConnected = edges.some(e => e.source === draggedNode.id && e.target === currentParent?.id);
