@@ -2,30 +2,36 @@ import React, { useState } from 'react';
 import { NodeResizer, useReactFlow, type Node } from '@xyflow/react';
 import { HierarchyManager } from '../utils/hierarchy';
 
+// Accent palette per group type
+function getAccent(isSpecGroup: boolean | undefined) {
+  if (isSpecGroup === true)  return { bg: 'rgba(16,185,129,0.06)',  border: 'rgba(16,185,129,0.22)',  active: '#10b981' };
+  if (isSpecGroup === false) return { bg: 'rgba(245,158,11,0.06)',  border: 'rgba(245,158,11,0.22)',  active: '#f59e0b' };
+  /* user-created */         return { bg: 'rgba(99,102,241,0.06)', border: 'rgba(99,102,241,0.22)', active: '#818cf8' };
+}
+
 export default function ContainerNode({ id, data, selected }: any) {
   const { setNodes } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
   const [label, setLabel] = useState(data.label || 'New Group');
 
+  const accent = getAccent(data.isSpecGroup);
+
   const handleSave = () => {
     setIsEditing(false);
-    setNodes((nds) => 
-      nds.map((node) => 
-        node.id === id ? { ...node, data: { ...node.data, label } } : node
-      )
-    );
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, label } } : n));
   };
 
-  const deleteNode = () => {
-    setNodes((nds) => {
-      const remainingNodes = nds.filter((n) => n.id !== id);
-      return remainingNodes.map((node) => {
+  const deleteNode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNodes(nds => {
+      const remaining = nds.filter(n => n.id !== id);
+      return remaining.map(node => {
         if (node.parentId === id) {
           return {
             ...node,
             parentId: undefined,
             position: HierarchyManager.getAbsolutePosition(node, nds),
-            extent: undefined
+            extent: undefined,
           };
         }
         return node;
@@ -47,21 +53,24 @@ export default function ContainerNode({ id, data, selected }: any) {
         const newGroupId = `specgroup-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const ingChildren = nds.filter(n => n.parentId === spec.id);
 
+        // Container sized to hold the spec comfortably
         newNodes.push({
           id: newGroupId,
           type: 'container',
           position: { x: specAbs.x - 24, y: specAbs.y - 48 },
-          style: { width: 300, height: 200 },
+          style: { width: 360, height: 300 },
           data: { label: (spec.data.label as string) || 'Spec Group', isSpecGroup: true },
         } as Node);
 
+        // Spec: no extent restriction so it can grow beyond container bounds
         newNodes.push({
           ...spec,
           parentId: newGroupId,
-          extent: 'parent',
+          extent: undefined,
           position: { x: 24, y: 48 },
         } as Node);
 
+        // Ingredients keep their positions relative to the spec
         ingChildren.forEach(ing => {
           const ingAbs = HierarchyManager.getAbsolutePosition(ing, nds);
           newNodes.push({
@@ -79,55 +88,92 @@ export default function ContainerNode({ id, data, selected }: any) {
   };
 
   return (
-    <div 
+    <div
       style={{
-        background: 'rgba(255,255,255,0.02)',
-        border: `2px dashed ${selected ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.12)'}`,
-        borderRadius: '12px',
+        background: selected
+          ? `${accent.bg.replace('0.06', '0.10')}`
+          : accent.bg,
+        border: `1.5px solid ${selected ? accent.active : accent.border}`,
+        borderRadius: '14px',
         height: '100%',
         width: '100%',
         position: 'relative',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        boxShadow: selected
+          ? `0 0 0 1px ${accent.active}40, 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)`
+          : `0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)`,
+        transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
       }}
     >
-      <NodeResizer 
-        isVisible={selected} 
-        minWidth={100} 
-        minHeight={100} 
-        lineStyle={{ border: '1.5px solid #10b981' }}
-        handleStyle={{ width: 8, height: 8, background: '#10b981', border: 'none' }}
+      <NodeResizer
+        isVisible={selected}
+        minWidth={200}
+        minHeight={160}
+        lineStyle={{ border: `1.5px solid ${accent.active}` }}
+        handleStyle={{ width: 8, height: 8, background: accent.active, border: 'none', borderRadius: 2 }}
       />
 
-      {/* Action Buttons */}
+      {/* Label inside top-left — Figma frame style */}
       <div className="no-export" style={{
         position: 'absolute',
-        top: '-12px',
-        right: '-12px',
+        top: 10,
+        left: 14,
+        right: 80,
+        pointerEvents: isEditing ? 'auto' : 'none',
+      }}>
+        {isEditing ? (
+          <input
+            autoFocus
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={e => e.key === 'Enter' && handleSave()}
+            style={{
+              fontSize: '11px',
+              fontWeight: 800,
+              background: 'rgba(0,0,0,0.4)',
+              color: 'white',
+              border: `1px solid ${accent.active}`,
+              borderRadius: '4px',
+              padding: '2px 6px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              outline: 'none',
+              width: '100%',
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              fontSize: '10px',
+              fontWeight: 800,
+              color: selected ? accent.active : `${accent.active}99`,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {label}
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons — top-right inside */}
+      <div className="no-export" style={{
+        position: 'absolute',
+        top: 6,
+        right: 8,
         display: 'flex',
         gap: '4px',
-        zIndex: 10
+        zIndex: 10,
       }}>
-        <button 
-          onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-          title="Edit group name"
-          style={{
-            background: 'rgba(255,255,255,0.10)',
-            border: '1px solid rgba(255,255,255,0.12)',
-            cursor: 'pointer',
-            fontSize: '10px',
-            color: 'white',
-            width: '24px',
-            height: '24px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-            transition: 'all 0.2s',
-            backdropFilter: 'blur(12px)',
-          }}
+        <button
+          onClick={e => { e.stopPropagation(); setIsEditing(true); }}
+          title="Rename group"
+          style={btnStyle('rgba(255,255,255,0.12)')}
         >
           ✏️
         </button>
@@ -135,93 +181,38 @@ export default function ContainerNode({ id, data, selected }: any) {
         {data.isSpecGroup === false && (
           <button
             onClick={handleUnmerge}
-            title="Split into individual spec groups"
-            style={{
-              background: '#f59e0b',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '10px',
-              color: 'white',
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-              transition: 'all 0.2s',
-            }}
+            title="Split back into individual spec groups"
+            style={btnStyle(accent.active + '33')}
           >
             ⚡
           </button>
         )}
 
         <button
-          onClick={(e) => { e.stopPropagation(); deleteNode(); }}
+          onClick={deleteNode}
           title="Delete group"
-          style={{
-            background: '#f87171',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '12px',
-            color: 'white',
-            width: '24px',
-            height: '24px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            opacity: 1,
-            pointerEvents: 'all',
-            transition: 'all 0.2s'
-          }}
+          style={btnStyle('#f8717133')}
         >
           ✕
         </button>
       </div>
-      
-      <div style={{
-        position: 'absolute',
-        top: '-24px',
-        left: '4px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px'
-      }}>
-        {isEditing ? (
-          <input 
-            autoFocus
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            onBlur={handleSave}
-            onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-            style={{ 
-              fontSize: '11px', 
-              fontWeight: 800, 
-              background: '#1e293b', 
-              color: 'white', 
-              border: '1px solid #10b981', 
-              borderRadius: '4px', 
-              padding: '2px 6px',
-              textTransform: 'uppercase',
-              outline: 'none'
-            }}
-          />
-        ) : (
-          <div 
-            style={{ 
-              fontSize: '11px', 
-              fontWeight: 800, 
-              color: selected ? '#10b981' : '#64748b', 
-              textTransform: 'uppercase', 
-              letterSpacing: '0.05em'
-            }}
-          >
-            📋 {label}
-          </div>
-        )}
-      </div>
     </div>
   );
+}
+
+function btnStyle(bg: string): React.CSSProperties {
+  return {
+    background: bg,
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '11px',
+    color: 'white',
+    width: '22px',
+    height: '22px',
+    borderRadius: '6px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.15s',
+  };
 }

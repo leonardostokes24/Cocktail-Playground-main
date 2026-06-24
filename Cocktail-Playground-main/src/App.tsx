@@ -63,6 +63,24 @@ const FORMULA_STRUCTURES: Record<string, { ingredients: { label: string; type: s
 let idCounter = 0;
 const getId = () => `node_${idCounter++}_${Date.now()}`;
 
+// Returns the ideal container size and spec position for a new spec-group.
+// For a blank spec (0 ingredients) the container is small; for formula/recipe clusters
+// it expands so ingredient nodes (at x = -300 relative to spec) fit inside.
+function computeSpecGroupLayout(nIngredients: number) {
+  if (nIngredients === 0) {
+    // 360 × 300 is large enough for a fully-populated spec card
+    return { specX: 24, specY: 48, width: 360, height: 300 };
+  }
+  // Ingredients are positioned at y = (idx*100) - (n*100/2) + 100 relative to spec.
+  const topIngY    = -(nIngredients * 100 / 2) + 100;
+  const bottomIngY = (nIngredients - 1) * 100 - (nIngredients * 100 / 2) + 100;
+  // Push spec down enough that the top ingredient stays inside the container (≥ 30px from top)
+  const specX = 320;
+  const specY = Math.max(80, 30 - topIngY);
+  const height = Math.max(300, specY + bottomIngY + 100);
+  return { specX, specY, width: 640, height };
+}
+
 function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { user: any, onLoginClick: () => void, onLogoutClick: () => void, onDemoLogin: () => void }) {
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -165,12 +183,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
 
   // Memoize sorted nodes so the O(n log n) sort isn't repeated on every render.
   const sortedNodes = useMemo(() => sortNodesByHierarchy(nodes), [nodes]);
-
-  // Selected containers — used to show the merge panel.
-  const selectedContainers = useMemo(
-    () => nodes.filter(n => n.selected && n.type === 'container'),
-    [nodes]
-  );
 
   const mergeGroups = useCallback((idA: string, idB: string) => {
     setNodes(nds => {
@@ -309,10 +321,36 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
   }, [edges, setNodes]);
 
   const onNodeDragStop = useCallback((_: any, draggedNode: Node) => {
+    // Containers: check if the dragged container's center is inside another container → merge
+    if (draggedNode.type === 'container') {
+      const nds = nodesRef.current;
+      const draggedAbs = HierarchyManager.getAbsolutePosition(draggedNode, nds);
+      const dW = (draggedNode.style?.width as number) || 300;
+      const dH = (draggedNode.style?.height as number) || 200;
+      const centerX = draggedAbs.x + dW / 2;
+      const centerY = draggedAbs.y + dH / 2;
+
+      const target = nds.find(n => {
+        if (n.type !== 'container' || n.id === draggedNode.id) return false;
+        const tAbs = HierarchyManager.getAbsolutePosition(n, nds);
+        const tW = (n.style?.width as number) || 300;
+        const tH = (n.style?.height as number) || 200;
+        return centerX >= tAbs.x && centerX <= tAbs.x + tW &&
+               centerY >= tAbs.y && centerY <= tAbs.y + tH;
+      });
+
+      if (target) {
+        mergeGroups(draggedNode.id, target.id);
+        showToast('Groups merged — click ⚡ on the container to split');
+      }
+      return;
+    }
+
+    // Ingredients / specs: parenting logic
     setNodes((nds) => {
       const abs = HierarchyManager.getAbsolutePosition(draggedNode, nds);
 
-      // 1. Find the best containing node (Container or Spec)
+      // Find the best containing node (Container or Spec)
       const parentContainer = HierarchyManager.pickContainingNode(
         nds.filter(n => n.type === 'container' && n.id !== draggedNode.id),
         abs,
@@ -320,9 +358,7 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
         { width: 300, height: 300 }
       );
 
-      // Only ingredients can be pulled into a spec via drag — dragging a spec
-      // near another spec must NOT parent it, or nodes visually stack and
-      // their coordinates become relative, breaking layout.
+      // Only ingredients can be pulled into a spec via drag
       const parentSpecCandidate = draggedNode.type === 'ingredient'
         ? HierarchyManager.pickContainingNode(
             nds.filter(n => n.type === 'spec' && n.id !== draggedNode.id),
@@ -332,57 +368,44 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
           )
         : null;
 
-      // A Spec only acts as a parent if it's in "Locked" mode
       const parentSpec = (parentSpecCandidate?.data?.isLocked !== false) ? parentSpecCandidate : null;
       const finalParent = parentContainer || parentSpec;
 
       if (finalParent) {
         if (draggedNode.parentId === finalParent.id) return nds;
-
         const parentAbs = HierarchyManager.getAbsolutePosition(finalParent, nds);
-
-        // Containers restrict dragging with extent:'parent'; spec parenting is loose (no extent)
-        const isContainer = finalParent.type === 'container';
-
         return nds.map(node => {
           if (node.id === draggedNode.id) {
             return {
               ...node,
               parentId: finalParent.id,
               position: { x: abs.x - parentAbs.x, y: abs.y - parentAbs.y },
-              extent: isContainer ? 'parent' : undefined
+              extent: undefined,
             } as Node;
           }
           return node;
         });
       }
 
-      // 2. If dropped outside, handle unparenting
+      // Dropped outside — unparent if needed
       if (draggedNode.parentId) {
-          const currentParent = nds.find(n => n.id === draggedNode.parentId);
-          const isLockedSpec = currentParent?.type === 'spec' && (currentParent.data?.isLocked !== false);
-
-          if (isLockedSpec) {
-            const isConnected = edges.some(e => e.source === draggedNode.id && e.target === currentParent?.id);
-            if (isConnected) return nds;
+        const currentParent = nds.find(n => n.id === draggedNode.parentId);
+        const isLockedSpec = currentParent?.type === 'spec' && (currentParent.data?.isLocked !== false);
+        if (isLockedSpec) {
+          const isConnected = edges.some(e => e.source === draggedNode.id && e.target === currentParent?.id);
+          if (isConnected) return nds;
+        }
+        return nds.map(node => {
+          if (node.id === draggedNode.id) {
+            return { ...node, parentId: undefined, position: { x: abs.x, y: abs.y }, extent: undefined } as Node;
           }
-
-          return nds.map(node => {
-            if (node.id === draggedNode.id) {
-              return {
-                ...node,
-                parentId: undefined,
-                position: { x: abs.x, y: abs.y },
-                extent: undefined
-              } as Node;
-            }
-            return node;
-          });
+          return node;
+        });
       }
 
       return nds;
     });
-  }, [setNodes, edges]);
+  }, [setNodes, edges, mergeGroups, showToast]);
 
   // Sync parenting with edges — uses a Map for O(1) node lookups instead of
   // repeated Array.find() calls (was O(n) per ingredient per edge change).
@@ -651,23 +674,23 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     const flowPos = screenToFlowPosition(radialPos);
     const specId = getId();
     const groupId = getId();
+    const { specX, specY, width, height } = computeSpecGroupLayout(0);
     setNodes((nds) => {
       const { parentId: outerParentId, resolvedPos } = resolveContainer(flowPos, nds, true);
       const groupNode: Node = {
         id: groupId,
         type: 'container',
-        position: { x: resolvedPos.x - 24, y: resolvedPos.y - 48 },
+        position: { x: resolvedPos.x - specX, y: resolvedPos.y - specY },
         parentId: outerParentId,
         extent: outerParentId ? 'parent' : undefined,
-        style: { width: 300, height: 200 },
+        style: { width, height },
         data: { label: 'Spec Group', isSpecGroup: true },
       };
       const specNode: Node = {
         id: specId,
         type: 'spec',
-        position: { x: 24, y: 48 },
+        position: { x: specX, y: specY },
         parentId: groupId,
-        extent: 'parent',
         data: { label: 'Custom Recipe', method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] },
       };
       return [...nds, groupNode, specNode];
@@ -693,22 +716,22 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     if (!config) return;
     const specId = getId();
     const groupId = getId();
+    const { specX, specY, width, height } = computeSpecGroupLayout(config.ingredients.length);
     setNodes((nds) => {
       const { parentId: outerParentId, resolvedPos } = resolveContainer(flowPos, nds, true);
       const clusterNodes: Node[] = [
         {
           id: groupId, type: 'container',
-          position: { x: resolvedPos.x - 24, y: resolvedPos.y - 48 },
+          position: { x: resolvedPos.x - specX, y: resolvedPos.y - specY },
           parentId: outerParentId,
           extent: outerParentId ? 'parent' : undefined,
-          style: { width: 300, height: 200 },
+          style: { width, height },
           data: { label, isSpecGroup: true },
         },
         {
           id: specId, type: 'spec',
-          position: { x: 24, y: 48 },
+          position: { x: specX, y: specY },
           parentId: groupId,
-          extent: 'parent',
           data: { label, method: 'Experimenting...', glassware: 'Unknown', isMatched: false, isCustomOverride: false, ingredientsList: [] },
         },
       ];
@@ -737,23 +760,23 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
     const flowPos = screenToFlowPosition(radialPos);
     const specId = getId();
     const groupId = getId();
+    const ings = recipe.standardIngredients ?? [];
+    const { specX, specY, width, height } = computeSpecGroupLayout(ings.length);
     setNodes((nds) => {
       const { parentId: outerParentId, resolvedPos } = resolveContainer(flowPos, nds, true);
-      const ings = recipe.standardIngredients ?? [];
       const clusterNodes: Node[] = [
         {
           id: groupId, type: 'container',
-          position: { x: resolvedPos.x - 24, y: resolvedPos.y - 48 },
+          position: { x: resolvedPos.x - specX, y: resolvedPos.y - specY },
           parentId: outerParentId,
           extent: outerParentId ? 'parent' : undefined,
-          style: { width: 300, height: 200 },
+          style: { width, height },
           data: { label: recipe.name, isSpecGroup: true },
         },
         {
           id: specId, type: 'spec',
-          position: { x: 24, y: 48 },
+          position: { x: specX, y: specY },
           parentId: groupId,
-          extent: 'parent',
           data: { label: recipe.name, method: recipe.method, glassware: recipe.glass, isMatched: true, isCustomOverride: false, ingredientsList: [] },
         },
       ];
@@ -848,30 +871,6 @@ function CocktailCanvas({ user, onLoginClick, onLogoutClick, onDemoLogin }: { us
           <div className="hint-icon">🍹</div>
           <div className="hint-title">Build Your First Spec</div>
           <div className="hint-sub">Right-click canvas · long-press on mobile · or tap +</div>
-        </div>
-      )}
-
-      {/* Merge panel — shown when exactly 2 containers are selected */}
-      {selectedContainers.length === 2 && (
-        <div style={{
-          position: 'fixed',
-          bottom: '80px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: '#0f172a',
-          border: '1px solid rgba(16,185,129,0.5)',
-          borderRadius: '10px',
-          padding: '8px 16px',
-          display: 'flex',
-          gap: '10px',
-          alignItems: 'center',
-          zIndex: 50,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-        }}>
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>2 groups selected</span>
-          <Button size="sm" onClick={() => mergeGroups(selectedContainers[0].id, selectedContainers[1].id)}>
-            Merge Groups
-          </Button>
         </div>
       )}
 
