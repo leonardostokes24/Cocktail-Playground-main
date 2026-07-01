@@ -1,0 +1,14 @@
+{
+  "name": "cocktail-ingest",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "ingest": "node --env-file=.env ingest.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "pdf-lib": "^1.17.1"
+  }
+}
