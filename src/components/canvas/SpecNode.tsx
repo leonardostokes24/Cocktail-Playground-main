@@ -1,6 +1,7 @@
 import React, { memo, useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { computeSpecCosts } from '../../utils/calculations';
+import { getFormula, formulaSecondArg } from '../../utils/formulaRegistry';
 import { useProofStore } from '../../store/useProofStore';
 import Glass from '../common/Glass';
 
@@ -14,13 +15,24 @@ function SpecNode({ id, selected }: { id: string; selected: boolean }) {
   const dilutionOverrides = useProofStore(s => s.dilutionOverrides);
   const branchSpec        = useProofStore(s => s.branchSpec);
   const removeSpec        = useProofStore(s => s.removeSpec);
+  const vatRate           = useProofStore(s => s.vatRate);
+  const sundriesPerServe  = useProofStore(s => s.sundriesPerServe);
+  const wasteRate         = useProofStore(s => s.wasteRate);
+  const activeFormulaId   = useProofStore(s => s.activeFormulaId);
+  const targetGpPct       = useProofStore(s => s.targetGpPct);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   if (!spec) return null;
 
   const costs = components
-    ? computeSpecCosts(spec.method, spec.sale_price, components, dilutionOverrides)
+    ? computeSpecCosts(spec.method, spec.sale_price, components, dilutionOverrides, { sundriesPerServe, wasteRate })
+    : null;
+
+  const activeFormula = getFormula(activeFormulaId);
+  const activeSecondArg = formulaSecondArg(activeFormula, spec.sale_price, targetGpPct);
+  const headline = costs && activeSecondArg != null
+    ? activeFormula.compute(costs.modifiedCost, activeSecondArg, vatRate)
     : null;
 
   const visibleComponents = (components ?? []).slice(0, MAX_VISIBLE_COMPONENTS);
@@ -83,7 +95,11 @@ function SpecNode({ id, selected }: { id: string; selected: boolean }) {
       {/* ── Gauge footer ─────────────────────────────────────────── */}
       <div style={divider} />
       <div style={gaugeRow}>
-        <Gauge label="GP" value={costs?.gpPct != null ? `${costs.gpPct.toFixed(0)}` : '—'} unit="%" />
+        <Gauge
+          label={activeFormula.label}
+          value={headline != null ? headline.toFixed(activeFormula.unit === '%' ? 0 : 2) : '—'}
+          unit={activeFormula.unit}
+        />
         <div style={gaugeDivider} />
         <Gauge label="ABV" value={costs ? costs.finalAbvPct.toFixed(1) : '—'} unit="%" />
         <div style={gaugeDivider} />

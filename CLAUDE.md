@@ -1,437 +1,206 @@
 # CLAUDE.md — Proof
 
-**The how.** Read `VISION.md` (the what/why) before writing any plan. Read `PLAN.md` for
-current phase tasks. This file is the daily coding reference: architecture, rules, patterns,
-tokens, hard constraints. If it isn't here, check VISION.md before inventing.
+**The how.** Read `VISION.md` first (what/why), `PLAN.md` for current tasks. This is the daily
+coding reference. Research-validated rules are marked ⚑ — they exist because the official docs
+or industry data say so, not preference. Do not relax them.
 
 ---
 
 ## One-line orientation
-Proof is a cocktail R&D canvas and open network. Private lineage tree → publish to CC-BY
-commons → cross-creator fork graph. The canvas is the workbench; `published_specs` is the
-public record.
-
----
+Private React Flow lineage canvas → ex-VAT GP costing → publish immutable snapshots to a CC-BY
+commons → cross-creator forks with permanent attribution. `published_specs`/`spec_versions` is
+the public record; the canvas is the private workbench.
 
 ## Tech stack
-| Layer | Choice |
-|---|---|
-| UI | React 18, TypeScript, Tailwind CSS |
-| Canvas | React Flow |
-| State | Zustand (`useProofStore`) |
-| DB / Auth | Supabase (Postgres 15, RLS) |
-| Hosting | Vercel |
-| Export | `jspdf`, `xlsx` |
-| Tests | Vitest (unit); especially `calculations.ts` |
+React 18 + TypeScript · React Flow · Zustand · Tailwind · Supabase (Postgres 15, RLS) · Vercel
+· decimal.js · jspdf/xlsx · Vitest. **100% TypeScript.** `any` needs a justifying comment.
 
-Everything is **TypeScript**. No `.js` source files. `any` requires a comment explaining why.
-
----
+## Commands
+`npm run dev` · `build` · `lint` · `test` (must be green) · `typecheck` (tsc --noEmit, must be 0)
 
 ## Directory map
 ```
 src/
   components/
-    canvas/          LineageCanvas.tsx, SpecNode.tsx
-    spec/            SpecPanel.tsx, SpecFields.tsx, ComponentRow.tsx,
-                     AddComponentForm.tsx, SpecMiniCanvas.tsx (optional future)
-    radial/          RadialMenu.tsx, RadialRing.tsx, RadialSearch.tsx
-    library/         IngredientLibrary.tsx, PrepLibrary.tsx,
-                     CatalogueSearch.tsx
-    common/          Glass.tsx (the glass wrapper component), GaugeBar.tsx,
-                     StatusBadge.tsx
-  store/
-    useProofStore.ts         slices: ingredients, preps, specs, edges, ui
-    selectors/
-      costSelectors.ts       memoized pour cost, formula results, dilution
-      canvasSelectors.ts     nodes/edges shaped for React Flow
-  utils/
-    calculations.ts          pure functions — costs, formula registry, dilution
-    units.ts                 all conversions → ml
-    formulaRegistry.ts       pluggable GP model registry
-    export.ts                spec → PDF / Excel
-    ingestion.ts             paste / OCR → spec (AI ingestion)
-  lib/
-    supabase/
-      client.ts
-      queries/
-        ingredients.ts
-        preps.ts
-        specs.ts
-        catalogue.ts
-        published.ts
-        venues.ts
-  types/
-    spec.ts, ingredient.ts, prep.ts, component.ts, venue.ts, published.ts
-supabase/
-  migrations/
-    0001_proof_node_revamp.sql
-    0002_proof_social_schema.sql
+    canvas/    LineageCanvas.tsx, SpecNode.tsx
+    spec/      SpecPanel.tsx, SpecFields.tsx, ComponentRow.tsx, AddComponentForm.tsx
+    radial/    RadialMenu.tsx, RadialRing.tsx, RadialSearch.tsx, ContextMenuFallback.tsx
+    library/   IngredientLibrary.tsx, PrepLibrary.tsx, CatalogueSearch.tsx
+    common/    Glass.tsx, GaugeBar.tsx, StatusBadge.tsx
+  store/       useProofStore.ts + selectors/ (costSelectors.ts, canvasSelectors.ts)
+  utils/       calculations.ts, formulaRegistry.ts, units.ts, money.ts, export.ts, ingestion.ts
+  lib/supabase/  client.ts + queries/ (ingredients, preps, specs, catalogue, published, venues)
+  types/       spec.ts, ingredient.ts, prep.ts, component.ts, venue.ts, published.ts
+supabase/migrations/  0001…, 0002…, 0003_research_hardening.sql
 ```
 
 ---
 
-## Commands
-```bash
-npm run dev        # local dev server
-npm run build      # Vercel production build
-npm run lint       # ESLint (pre-commit hook enforces)
-npm run test       # Vitest unit tests — must be green before merging
-npm run typecheck  # tsc --noEmit
-```
+## React Flow — performance rules ⚑
+React Flow uses Zustand internally; Zustand is the mandated state layer. These rules come from
+the official performance guide and independent audits — violating them is how canvases die:
+
+- **Memoize `SpecNode` with `React.memo`**; define it outside any parent component. Memoize
+  every handler passed to nodes with `useCallback`.
+- **Never subscribe a component to the whole nodes array** when it needs a slice. Use Zustand
+  selectors with **`useShallow`**. Store derived state (e.g. `selectedNodeIds`) separately.
+- **Enable `onlyRenderVisibleElements`** on the canvas (virtualization) — required, not optional.
+- React Flow is a **renderer, not a state owner**. Nodes/edges come from `canvasSelectors.ts`.
+  Never `setNodes` with a freshly-mapped array on every render (re-mounts canvas, kills drag).
+- Debounce `onNodeDragStop` position writes (300ms).
+- Keep node CSS light: the glass treatment lives on the card, but avoid animating
+  `backdrop-filter` or stacking heavy shadows per node.
+- Defer heavy per-node computation (`useDeferredValue` if cost recalc ever janks drag).
+- **Benchmark gate: 60fps at 100+ nodes.** If it drops, virtualize/simplify before features.
+
+## Two layers — do not collapse
+- **Outer:** one node type, `SpecNode`. Edges: same-user branch (`parent_spec_id`) vs
+  cross-user fork (`forked_from_published_id`) — style them differently (solid vs dashed).
+  App-side cycle guard on branch/move.
+- **Inner:** `SpecPanel`, a side drawer/form. UI fully decoupled from data (store actions
+  only, zero direct Supabase calls) so a mini-canvas can swap in later.
 
 ---
 
-## Architecture — two layers, do not collapse them
+## Money — precision rules ⚑
+JS floats are unsafe for money (`0.1+0.2 ≠ 0.3`). Non-negotiable:
+- All money math in **decimal.js** via `utils/money.ts` helpers. Every operand a `Decimal`.
+- Postgres columns are `numeric`. **The pg driver returns `numeric` as strings** — never
+  `Number()` / `parseFloat()` them; feed strings straight into `new Decimal()`.
+- Round only at display time (`toDecimalPlaces(2)`); multiply before dividing.
 
-### Outer layer: lineage canvas
-- **One React Flow node type: `SpecNode`.** A whole drink version. Compact card.
-- Edges = `parent_spec_id` (same-user private branch) OR `forked_from_published_id`
-  (cross-user public fork). Both render on the canvas; style them differently.
-- Branch action: clone parent's full `spec_components` into a new child, place nearby,
-  draw the edge, open in SpecPanel.
-- Persist `canvas_x` / `canvas_y` on drag end (debounced 300ms). Never lose layout.
-- Guard against lineage cycles app-side on branch/move. SQL only blocks direct self-parent.
-
-### Inner layer: spec editor (SpecPanel)
-- A **side drawer / form**, NOT a nested canvas (method was ranked last — a recipe is a list).
-- Keep SpecPanel's UI **fully decoupled from the data layer**: it reads/writes via store
-  actions only, no direct Supabase calls. This allows the future mini-canvas swap (SpecMiniCanvas)
-  without any schema or store changes.
-- Shows: component list, method, sale price, glass, garnish, build text, full cost breakdown.
-
-### State
-- Zustand store owns all app state. React Flow reads nodes/edges from `canvasSelectors.ts`
-  — never maintain a parallel node array; that's how stale-state bugs happen.
-- Derived cost values live in **memoized selectors** (`costSelectors.ts`), not in component
-  state. Update one ingredient price → every spec that uses it reflects the change instantly.
+## Cost engine & formula registry
+```
+cost_per_ml(ingredient) = pack_cost / pack_size_ml     ← user's OWN price, always
+catalogue reference_price = cold-start seed ONLY        ← never in any formula ⚑
+prep cost_per_ml = Σ(components) / yield_ml
+pour_cost = Σ(amount_ml × cost_per_ml)
+modifiedCost = (pour_cost + sundries£) × (1 + wasteRate)   // waste default .05, range .05–.20
+net = salePrice / (1 + vatRate)                             // vatRate SETTING, default 0.20 ⚑
+GP% = (net − modifiedCost) / net × 100                      // UK standard: EX-VAT, always
+```
+- Formula registry (`formulaRegistry.ts`): `gp_ex_vat` (default) · `pour_cost_pct` ·
+  `cash_margin` · `markup` · `target_gp_price` (reverse) · `target_pour_cost_price` (reverse).
+  Interface: `{ id, label, unit, compute(cost, saleGross, vatRate), reverse? }`. UI reads the
+  registry — a formula never appears hard-coded in a component.
+- **GP targets are user-set, never asserted** ⚑ — pricing guides say 70–80%, measured pub wet
+  GP is 49–58%. Show realized vs user target; no editorializing.
+- Dilution: `{shaken:.25, stirred:.22, built:.10, thrown:.18}` user-editable defaults; affects
+  volume/ABV/batch water only, **never cost**. Batch view exposes the water line.
+- Units: everything normalises to ml on write (`units.ts`); `original_unit` advisory only.
 
 ---
 
-## Data model (migrations 0001 + 0002)
+## Supabase & data rules ⚑
+- **RLS deny-by-default on every public-schema table.** Authenticated session for every query;
+  no service-role key client-side. Query helpers in `lib/supabase/queries/` — none in components.
+- **UPDATE policies silently no-op without a matching SELECT policy** — always pair them.
+- Use `SECURITY DEFINER` helper functions for cross-user or recursive permission checks
+  (avoids recursive-policy 500s and per-row subquery cost). `is_venue_owner()` exists; follow
+  the pattern.
+- **Lineage = adjacency list + recursive CTE.** `parent_id`-style columns traversed with
+  `WITH RECURSIVE`, using PG15 `CYCLE ... SET ... USING` for loop safety. No ltree, no
+  materialized paths.
+- **Cross-user lineage MUST be read via the `get_spec_lineage()` SECURITY DEFINER RPC**
+  (migration 0003). Plain RLS reads truncate lineage to the caller's own rows — public
+  ancestry silently breaks. Never traverse lineage client-side over the specs table.
+- **`published_specs` is append-only, enforced by trigger** (0003), not just absent policies.
+  Never add an UPDATE path, never patch a published row. New version = new row.
+- Search: generated `tsvector` + GIN, query with `websearch_to_tsquery`
+  (`.textSearch(col, q, { type: 'websearch' })`); `setweight` name='A' over body='B'.
+  Generated columns can't see other tables — cross-table search vectors use triggers.
+- Cost views keep `security_invoker = true`.
 
-### Core tables (0001)
-| Table | Key columns | Notes |
-|---|---|---|
-| `ingredients` | `user_id, name, type, abv, pack_size_ml, pack_cost, cost_per_ml` (generated) | Personal cost library |
-| `preps` | `user_id, name, yield_ml, method` | Shared sub-recipes |
-| `prep_components` | `prep_id, ingredient_id, amount_ml` | Ingredients only, no nested preps |
-| `specs` | `user_id, name, parent_spec_id, method, sale_price, canvas_x/y` | One node = one version |
-| `spec_components` | `spec_id, ingredient_id XOR prep_id, amount_ml` | XOR enforced by constraint |
-
-### Social tables (0002)
-| Table | Key columns | Notes |
-|---|---|---|
-| `catalogue_ingredients` | `name, type, abv, default_pack_size_ml, reference_price, contributed_by` | World-readable; any authed user can contribute |
-| `venues` | `name, slug, city, created_by` | Followable identity |
-| `user_venues` | `user_id, venue_id, role (owner\|bartender\|guest)` | M:M with roles |
-| `published_specs` | `creator_id, venue_id, forked_from_id, name, components_snapshot (JSONB), published_at` | **INSERT-ONLY. No updates ever.** |
-
-### Key columns added to `specs` in 0002
-```
-visibility            text  'private' | 'published'   (default 'private')
-venue_id              uuid  → venues.id
-published_at          timestamptz
-published_spec_id     uuid  → published_specs.id  (set once on publish)
-forked_from_published_id uuid → published_specs.id  (cross-user fork origin)
-```
-
-### Cost resolution — two-level
-```
-ingredients.cost_per_ml  = pack_cost / pack_size_ml     ← user's personal price. ALWAYS used.
-catalogue reference_price = cold-start seed only.        ← NEVER in any cost formula.
-prep.cost_per_ml         = Σ(comp.amount_ml × ing.cost_per_ml) / yield_ml
-spec.pour_cost           = Σ(comp.amount_ml × cost_per_ml)    ← from spec_costs view
-```
-`cost_per_ml` is a Postgres **generated column** on `ingredients`. Never recompute it in TS.
-
-### published_specs is INSERT-ONLY
-This is the immutability guarantee. No `UPDATE` RLS policy exists. A fork always has a
-stable row to point at. **Never add an update policy, never patch published rows, never
-work around this.** If a correction is needed, publish a new version and link it.
-
-### RLS rules (summary)
-- `ingredients / preps / specs / components`: own rows only (`user_id = auth.uid()`).
-- `catalogue_ingredients`: authenticated read; contributor insert/update (unverified only).
-- `venues`: authenticated read; owner CRUD.
-- `published_specs`: authenticated read; creator insert; creator delete (app must check no
-  forks exist before calling delete).
-- `specs` RLS **does not expose published specs to other users** — they read `published_specs`.
+## Data model quick reference
+0001: `ingredients` (user cost lib, generated `cost_per_ml`) · `preps` (+yield) ·
+`prep_components` (ingredients only — no nesting) · `specs` (one node = one version;
+`parent_spec_id` = private branch) · `spec_components` (ingredient XOR prep).
+0002: `catalogue_ingredients` (shared, world-readable, `reference_price` advisory) · `venues` +
+`user_venues` (M:M, roles) · `published_specs` (immutable snapshots; `forked_from_id` =
+cross-creator lineage; `components_snapshot` JSONB) · specs gain `visibility`, `venue_id`,
+`published_spec_id`, `forked_from_published_id`.
+0003: immutability trigger, lineage RPC, weighted FTS.
 
 ---
 
-## Cost engine & formula registry (`calculations.ts` + `formulaRegistry.ts`)
-
-### Cost modifiers (applied to pour_cost before any formula)
-```ts
-modifiedCost = (pourCost + sundries) * (1 + wasteRate)
-// sundries: fixed £ per serve (garnish, ice, straw)
-// wasteRate: e.g. 0.05 for 5% spillage
-// dilution does NOT affect cost — only volume and ABV
-```
-
-### Formula registry pattern
-Adding a new costing model = one pure function + one registry entry. UI reads the registry;
-never hardcode a formula into a component.
-
-```ts
-// formulaRegistry.ts
-export interface CostFormula {
-  id: string
-  label: string
-  unit: string
-  compute: (cost: number, saleGross: number, vatRate: number) => number
-  reverse?: (targetValue: number, cost: number, vatRate: number) => number
-}
-
-export const formulaRegistry: CostFormula[] = [
-  {
-    id: 'gp_ex_vat',
-    label: 'GP %',
-    unit: '%',
-    compute: (cost, sale, vat) => {
-      const net = sale / (1 + vat)
-      return ((net - cost) / net) * 100
-    },
-    reverse: (targetGP, cost, vat) => (cost / (1 - targetGP / 100)) * (1 + vat)
-  },
-  {
-    id: 'pour_cost_pct',
-    label: 'Pour cost %',
-    unit: '%',
-    compute: (cost, sale, vat) => (cost / (sale / (1 + vat))) * 100
-  },
-  {
-    id: 'cash_margin',
-    label: 'Cash margin',
-    unit: '£',
-    compute: (cost, sale, vat) => sale / (1 + vat) - cost
-  },
-  {
-    id: 'markup',
-    label: 'Markup',
-    unit: '×',
-    compute: (cost, sale, vat) => (sale / (1 + vat)) / cost
-  },
-  // Target-price reverse models — use .reverse() fn
-]
-```
-
-### GP is always calculated on the EX-VAT price
-```ts
-const net = salePrice / (1 + vatRate)  // vatRate default 0.20
-const gp  = ((net - cost) / net) * 100
-```
-The old formula (on gross price) overstates GP by ~5 points. Do not regress.
-
-### Dilution
-```ts
-const dilutionFactor: Record<string, number> = {
-  shaken: 0.25, stirred: 0.22, built: 0.10, thrown: 0.18
-}
-finalVolume = liquidMl * (1 + dilutionFactor[method] ?? 0)
-finalAbv    = Σ(vol_i * abv_i) / finalVolume
-```
-Factors are **user-editable** (live in settings, not hardcoded). Always read from store.
-
-### Unit conversion
-Everything **normalises to ml on write**. `units.ts` provides `toMl(amount, unit): number`.
-`original_amount` + `original_unit` are stored for authoring round-trips only.
+## Radial menu rules ⚑
+Radial menus are measurably faster with practice but **harder to learn** — design for both:
+- **Max 6–8 segments per ring** (accuracy ceiling). More = sub-rings.
+- **Anchor on the touched object.** Long-press 300ms → drag-to-segment → release (touch);
+  right-click (desktop); hotkey (keyboard). Account for the finger obscuring the menu
+  (offset/partial-arc on touch).
+- **Ship `ContextMenuFallback.tsx`** — a conventional context menu with identical actions, plus
+  first-run onboarding hints. New users must never be stranded.
+- Fully keyboard navigable; inline confirm segment for destructive actions; never a modal.
+- Context rings: empty canvas → New spec · Search commons · Quick-ingest · New prep.
+  Spec node → Branch · Add component (8-category ingredient sub-ring matching
+  `catalogue_ingredients.type`) · Open · Duplicate · Publish · Delete.
+  Component → Edit amount · Swap · Convert to prep · Remove.
+- Centre type-ahead: debounced 200ms, searches own ingredients + catalogue + commons; recents
+  first (`ui.recentIngredients`).
 
 ---
 
-## Radial menu system (`/src/components/radial/`)
+## Visual identity — glass with a chromatic whisper ⚑
+`backdrop-filter` is GPU-expensive; translucency is a WCAG risk. Hard rules from research:
+- **Glass only on small floating surfaces** — SpecNode cards, radial, panel chrome. Never
+  full-screen, never behind body text. Blur ≤ 24px, few layers.
+- **Never animate `backdrop-filter`.** Sheen is a background-position sweep on the card only.
+- Solid fallbacks (`@supports not (backdrop-filter: blur(1px))`), respect
+  `prefers-reduced-transparency` (solid surfaces) and `prefers-reduced-motion` (no sheen/lift).
+- **Text on glass must pass WCAG AA** — verify node text against the darkest and lightest bloom.
 
-The primary creation surface. **Not a nice-to-have — it's Pillar 1.**
-
-### Invocation
-- Desktop: right-click anywhere on canvas or a node.
-- Tablet/touch: long-press (300ms), then drag to segment, release to select.
-- Keyboard: configurable hotkey (default `Space` on canvas focus).
-
-### Context rings (what the ring shows depends on what was invoked on)
-```
-Empty canvas  → New spec · Search library (fork) · Quick-ingest · New prep
-Spec node     → Branch / Riff · Add component → sub-ring · Open recipe ·
-                Duplicate · Publish/Unpublish · Delete
-Component     → Edit amount · Swap ingredient · Convert to prep · Remove
-```
-
-### Sub-ring: ingredient categories
-Eight segments: spirit · modifier · citrus · sweetener · bitters · prep · syrup · other.
-Selecting a category filters the type-ahead to that type. This is the old category wheel,
-reborn inside the new model — keep the category IDs consistent with `catalogue_ingredients.type`.
-
-### Type-ahead at centre
-Searches `ingredients` (user's own) AND `catalogue_ingredients` AND `published_specs` in
-parallel with debounced queries (200ms). Results populate the ring dynamically. Recently and
-frequently used surface first (track in Zustand `ui.recentIngredients`).
-
-### Rules
-- The radial never opens a blocking modal. If a confirmation is needed (delete), it shows an
-  inline confirm segment on the ring itself.
-- Fully keyboard-navigable (arrow keys cycle segments, Enter selects, Escape closes).
-- **Success criterion: spec + three ingredients with no form field interaction beyond search.**
-
----
-
-## Visual identity — glass, with a chromatic whisper
-
-A glass UI with subtle chromatic aberration. The colour is a *whisper* at the edges only.
-**If the chroma is the first thing you notice, it's too loud.**
-Reference mock: `proof-glass-refined.html` (NOT the louder first-pass mock).
-
-### CSS tokens
 ```css
 :root {
-  /* Ground */
-  --bg: #0C0B14;
-
-  /* Light blooms (quiet — they exist so glass has something to refract) */
-  --bloom-indigo: rgba(58, 51, 128, 0.30);
-  --bloom-teal:   rgba(29, 95, 114, 0.28);
-  --bloom-plum:   rgba(90, 42, 102, 0.22);
-
-  /* Glass material */
-  --glass-fill:   linear-gradient(168deg, rgba(255,255,255,.085), rgba(255,255,255,.025));
-  --glass-border: rgba(255, 255, 255, 0.14);
-  --glass-blur:   blur(24px) saturate(135%);
-
-  /* Edge dispersion — THE only chroma on a card */
-  --edge-cyan:    rgba(120, 225, 255, 0.42);
-  --edge-magenta: rgba(255, 135, 210, 0.36);
-  --edge-top:     rgba(255, 255, 255, 0.22);
-
-  /* Type aberration — sub-pixel, felt not seen */
-  --aberration: -.4px 0 rgba(120,225,255,.42), .4px 0 rgba(255,135,210,.36);
-
-  /* Gauge accent */
-  --cyan: #7FE6FF;
-
-  /* UI ink */
-  --ink:  #EEF0FA;
-  --mute: #9296B4;
+  --bg:#0C0B14;
+  --bloom-indigo:rgba(58,51,128,.30); --bloom-teal:rgba(29,95,114,.28); --bloom-plum:rgba(90,42,102,.22);
+  --glass-fill:linear-gradient(168deg,rgba(255,255,255,.085),rgba(255,255,255,.025));
+  --glass-border:rgba(255,255,255,.14); --glass-blur:blur(24px) saturate(135%);
+  --edge-cyan:rgba(120,225,255,.42); --edge-magenta:rgba(255,135,210,.36); --edge-top:rgba(255,255,255,.22);
+  --aberration:-.4px 0 rgba(120,225,255,.42),.4px 0 rgba(255,135,210,.36);
+  --cyan:#7FE6FF; --ink:#EEF0FA; --mute:#9296B4;
 }
 ```
+Edge dispersion is **the only chroma**: `inset 1px 0 0 var(--edge-cyan), inset -1px 0 0
+var(--edge-magenta), inset 0 1px 0 var(--edge-top)` — encapsulated once in `Glass.tsx`.
+Aberration text-shadow on display type only. Type: Bricolage Grotesque 700 (display), Inter
+Tight (UI), JetBrains Mono (gauges/amounts). Calm hierarchy: node > panel (more opaque, no
+sheen) > radial > flat chrome. Hover lift `translateY(-4px)` .4s cubic-bezier(.2,.7,.2,1).
 
-### Glass component (`Glass.tsx`)
-Encapsulate the glass material as a reusable component so the aesthetic is consistent and
-tuneable in one place.
-```tsx
-// box-shadow: inset 1px 0 0 var(--edge-cyan),
-//             inset -1px 0 0 var(--edge-magenta),
-//             inset 0 1px 0 var(--edge-top),
-//             0 28px 56px -28px rgba(0,0,0,.85)
-```
-
-### Type
-| Role | Font | Weight |
-|---|---|---|
-| Display / name | Bricolage Grotesque | 700 |
-| UI labels, body | Inter Tight | 400, 500 |
-| Gauges, amounts | JetBrains Mono | 400, 500 |
-
-Apply `text-shadow: var(--aberration)` to display type only (spec name, brand). Nowhere else.
-
-### Hierarchy of calm
-1. Canvas nodes: glass material, edge dispersion, slow sheen animation.
-2. SpecPanel: **more opaque** (`rgba(255,255,255,.10)` fill, no sheen) — you're editing, not browsing.
-3. Radial menu: semi-transparent, no sheen — it's transient chrome.
-4. System chrome (topbar, sidebar): flat dark — let the nodes breathe.
-
-### Motion
-- Hover lift: `translateY(-4px)`, `transition: 0.4s cubic-bezier(.2,.7,.2,1)`.
-- Sheen sweep: 9s ease-in-out, `background-size: 240%` sweep. Only on canvas nodes.
-- **Always** respect `prefers-reduced-motion: reduce` — disable sheen and transitions.
-
-### SpecNode card anatomy
-```
-┌──────────────────────────────────────┐  ← 1px border (--glass-border)
-│ lineage hint        status badge     │  ← 10.5px Inter Tight, --mute
-│                                      │  ← edge-cyan left / edge-magenta right
-│ Spec Name                            │  ← Bricolage 700 27px + aberration
-│ METHOD · GLASS                       │  ← 11px Inter Tight uppercase --mute
-│                                      │
-│ Component Name              45 ml    │  ← 13px Inter / 11.5px JetBrains Mono
-│ Another component           20 ml    │
-│ ...                                  │
-│ ─────────────────────────────────────│
-│  GP 78%    │  ABV 18.4%  │  96ml     │  ← JetBrains Mono 500, --cyan units
-└──────────────────────────────────────┘
-```
+## Touch & tablet
+Equal first-class target. 44×44px minimum tap targets; test at 768/1024px; React Flow's
+built-in pinch/pan untouched; no hover-dependent UI.
 
 ---
 
-## React & React Flow rules
-- Functional components + hooks only. No class components.
-- **One node type: `SpecNode`.** Old IngredientNode / ProcessNode / GlasswareNode are deleted.
-- All node/edge data lives in Zustand. React Flow is a **renderer**, not a state owner.
-  Use `useNodesState` / `useEdgesState` driven by selectors, not local component state.
-- Debounce position updates on `onNodeDragStop` (300ms) before writing to Supabase.
-- Never call `setNodes` with a freshly-mapped array on every render — that causes the
-  whole canvas to re-mount and kills drag state.
-- Component line limit: ~150 lines. If longer, extract and explain why in a comment.
-- `SpecPanel` is swappable: UI only talks to store actions, zero direct Supabase calls.
-
----
-
-## Supabase & data rules
-- Every query uses the **authenticated user's session**. No service-role key on the client.
-- RLS is the security layer. Never bypass it with a direct table scan.
-- Cost rollup views (`prep_costs`, `spec_costs`, `spec_component_costs`) have
-  `security_invoker = true` — the caller's RLS applies. Don't change this.
-- Write helpers in `src/lib/supabase/queries/` — no raw Supabase calls in components.
-- `published_specs` is **insert-only**. Never add an update query for it. Never.
-- Numeric money values: `numeric` in Postgres, not `float`. `BigDecimal`-style in TS if
-  precision matters (use `decimal.js`). Never `Math.round` a cost.
-- All volumes write as **ml** (`units.ts`). Original unit is advisory only.
-- Use Supabase Edge Functions only for genuinely heavy work (large PDF exports, batch jobs).
-  Client-side is fine for single-spec exports.
-
----
-
-## Touch & tablet rules
-Desktop and tablet are **equal, first-class targets**. Not an afterthought.
-- Minimum tap target: 44×44px.
-- Radial menu: long-press (300ms) + drag-to-segment + release. No hover-dependent UI.
-- Avoid fixed sidebars that consume too much viewport on a 768px tablet.
-- Test layouts at 768px and 1024px, not just 1440px.
-- Canvas pan/zoom: React Flow's built-in touch gestures (pinch-zoom, two-finger pan).
-  Do not override these.
-
----
+## Commons & licensing rules
+- Publishing snapshots the full spec (`components_snapshot` JSONB) — self-contained, resolvable
+  without joins, immutable.
+- **Attribution is data** (creator_id + venue_id travel with every published row and render on
+  every card). CC-BY covers user prose/photos; the spec itself is uncopyrightable — never
+  imply Proof grants recipe *ownership*, only credit. No IP-enforcement features, ever.
+- Unpublish hides from discovery; the snapshot row persists (forks depend on it). Deleting a
+  published spec is blocked app-side if forks reference it, with a human message.
 
 ## Hard DO NOT list
-Read this before shipping any PR.
-
 | DO NOT | Why |
 |---|---|
-| Add an UPDATE policy on `published_specs` | Breaks immutable lineage guarantee |
-| Use `alert()`, `prompt()`, `confirm()` | Kills the "fast and tactile" feel |
-| Hardcode a GP formula in a component | Breaks the pluggable formula registry |
-| Use `float` / `number` for money | Floating-point errors in cost display |
-| Call Supabase directly from a component | Bypasses the query abstraction layer |
-| Let React Flow own node state | Causes stale-state and drag-reset bugs |
-| Add another canvas node type | The two-layer model is one node type only |
-| Nest preps inside preps | Recursive cost cycles; explicitly out of scope |
-| Use `catalogue.reference_price` in cost formula | User's pack_cost is always the source |
-| Build discovery feed / follow / ratings UI | Deferred — schema-aware but don't build yet |
-| Add any AI feature beyond ingestion | Out of scope for v1 |
-| Ignore `prefers-reduced-motion` | Accessibility + respect for bar-floor use |
+| Update/patch `published_specs` rows | Trigger will reject; lineage immutability ⚑ |
+| Traverse cross-user lineage without the RPC | RLS silently truncates ancestry ⚑ |
+| Use JS `number` / `Number()` for money | Float errors; pg returns numeric as string ⚑ |
+| Put `reference_price` in a cost formula | User's own pack_cost is always the source |
+| Hard-code VAT, GP targets, or any formula in a component | Settings + registry only ⚑ |
+| Subscribe components to the whole nodes array | Re-render storm ⚑ |
+| Animate backdrop-filter / glass full-screen | GPU + WCAG ⚑ |
+| `alert()` / `prompt()` / `confirm()` | Anti-clunk |
+| Add node types, nest preps, build deferred social UI, add AI beyond ingestion | Scope |
 
----
-
-## Anti-clunk checklist
-Before marking any phase done, verify:
-- [ ] New spec + first ingredient in ≤ 3 radial interactions (no form beyond search).
-- [ ] GP / cost readout updates on every keystroke in SpecPanel — no stale values.
-- [ ] Switching the active formula model re-renders **all** canvas node headlines at once.
-- [ ] Radial is context-correct on: empty canvas, spec node, component row.
-- [ ] No `alert` / `prompt` / `confirm` anywhere in the codebase (`grep -r "window.alert\|window.prompt\|window.confirm"`).
-- [ ] Dragging a node does not snap back on release.
-- [ ] Selecting a node does not rebuild the full nodes array.
-- [ ] Touch: long-press radial works on a real tablet (or BrowserStack).
-- [ ] Published spec: appears in `public_specs_feed` view, forkable from radial.
-- [ ] Forked spec: `forked_from_published_id` is set, ancestry traceable to root.
-- [ ] `npm run typecheck` exits 0.
-- [ ] `npm run test` exits 0.
+## Anti-clunk checklist (run before any phase is "done")
+- [ ] Spec + 3 ingredients via radial only · [ ] fallback context menu works
+- [ ] Cost updates per keystroke; formula switch re-renders all nodes at once
+- [ ] 60fps drag at 100 nodes (React profiler) · [ ] no full-array rebuild on select
+- [ ] `grep -rn "alert(\|prompt(\|confirm(" src/` → zero hits
+- [ ] Long-press radial verified on a real tablet/BrowserStack at 768px
+- [ ] Publish → visible in feed → forkable; fork ancestry traceable to root via RPC
+- [ ] AA contrast on glass; reduced-transparency + reduced-motion honoured
+- [ ] `typecheck` 0 · `test` green

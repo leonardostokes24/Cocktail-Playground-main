@@ -5,11 +5,13 @@ import {
   type NodeMouseHandler, type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { useShallow } from 'zustand/react/shallow';
 
 import { useProofStore } from '../../store/useProofStore';
 import SpecNodeComponent from './SpecNode';
 import IngredientLibrary from '../library/IngredientLibrary';
 import SpecPanel from '../spec/SpecPanel';
+import SettingsPanel from '../spec/SettingsPanel';
 import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
 
 // Defined outside component so the reference never changes between renders.
@@ -29,11 +31,23 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     specs, specsLoading, selectedSpecId,
     loadSpecs, loadSpecCosts, loadIngredients, loadAllSpecComponents,
     createSpec, editSpec, selectSpec,
-  } = useProofStore();
+  } = useProofStore(useShallow(state => ({
+    specs: state.specs,
+    specsLoading: state.specsLoading,
+    selectedSpecId: state.selectedSpecId,
+    loadSpecs: state.loadSpecs,
+    loadSpecCosts: state.loadSpecCosts,
+    loadIngredients: state.loadIngredients,
+    loadAllSpecComponents: state.loadAllSpecComponents,
+    createSpec: state.createSpec,
+    editSpec: state.editSpec,
+    selectSpec: state.selectSpec,
+  })));
 
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
-  const dragSaveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const dragSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const didFitRef = useRef(false);
   const { fitView } = useReactFlow();
 
@@ -102,7 +116,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     clearTimeout(dragSaveTimer.current);
     dragSaveTimer.current = setTimeout(() => {
       editSpec(node.id, { canvas_x: node.position.x, canvas_y: node.position.y });
-    }, 500);
+    }, 300);
   }, [editSpec]);
 
   const handleNewSpec = useCallback(async () => {
@@ -148,6 +162,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           {user ? (
             <>
               <button onClick={() => setShowLibrary(true)} style={hBtn()}>🧪 Library</button>
+              <button onClick={() => setShowSettings(true)} style={hBtn()}>⚙ Settings</button>
               <button onClick={handleNewSpec} style={hBtn('#10b981')}>+ New Spec</button>
               <button onClick={onLogoutClick} style={hBtn()}>Sign Out</button>
             </>
@@ -171,6 +186,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           onNodeContextMenu={onNodeContextMenu}
           minZoom={0.2}
           maxZoom={2}
+          onlyRenderVisibleElements
           proOptions={{ hideAttribution: true }}
         >
           <Background color="#1e293b" gap={24} size={1} />
@@ -197,6 +213,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       </div>
 
       {showLibrary && <IngredientLibrary onClose={() => setShowLibrary(false)} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {selectedSpecId && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
       {radialCtx && <RadialMenu context={radialCtx} onClose={() => setRadialCtx(null)} />}
     </div>

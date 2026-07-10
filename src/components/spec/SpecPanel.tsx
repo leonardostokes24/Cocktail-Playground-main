@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import { useProofStore } from '../../store/useProofStore';
 import { computeSpecCosts } from '../../utils/calculations';
+import { formulaRegistry, formulaSecondArg } from '../../utils/formulaRegistry';
 import SpecFields from './SpecFields';
 import ComponentRow from './ComponentRow';
 import AddComponentForm from './AddComponentForm';
@@ -13,7 +14,8 @@ interface Props {
 export default function SpecPanel({ specId, onClose }: Props) {
   const {
     specs, specComponents, componentsLoading, ingredients, dilutionOverrides,
-    editSpec, addComponent, editComponent, removeComponent,
+    vatRate, sundriesPerServe, wasteRate, targetGpPct, activeFormulaId,
+    editSpec, addComponent, editComponent, removeComponent, setActiveFormulaId,
   } = useProofStore();
   const [addingComponent, setAddingComponent] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -21,8 +23,10 @@ export default function SpecPanel({ specId, onClose }: Props) {
 
   const spec = specs.find((s) => s.id === specId);
   const costs = useMemo(() =>
-    spec ? computeSpecCosts(spec.method, spec.sale_price, specComponents, dilutionOverrides) : null,
-    [spec, specComponents, dilutionOverrides]
+    spec
+      ? computeSpecCosts(spec.method, spec.sale_price, specComponents, dilutionOverrides, { sundriesPerServe, wasteRate })
+      : null,
+    [spec, specComponents, dilutionOverrides, sundriesPerServe, wasteRate]
   );
 
   const handleSaveField = useCallback((patch: Parameters<typeof editSpec>[1]) => {
@@ -136,8 +140,40 @@ export default function SpecPanel({ specId, onClose }: Props) {
           </div>
           <div style={costDetailRowStyle}>
             <CostDetail label="Pour cost" value={`£${costs.pourCost.toFixed(3)}`} />
+            <CostDetail label="Modified cost" value={`£${costs.modifiedCost.toFixed(3)}`} />
             <CostDetail label="Liquid" value={`${costs.liquidVolumeMl.toFixed(0)} ml`} />
             <CostDetail label="Pre-dil ABV" value={`${costs.preDilutionAbv.toFixed(1)}%`} />
+          </div>
+
+          {targetGpPct != null && costs.gpPct != null && (
+            <div style={targetRowStyle}>
+              <span style={targetLabelStyle}>Realized GP</span>
+              <span style={targetValueStyle}>{costs.gpPct.toFixed(1)}%</span>
+              <span style={targetLabelStyle}>vs target</span>
+              <span style={targetValueStyle}>{targetGpPct.toFixed(1)}%</span>
+            </div>
+          )}
+
+          <div style={formulaBreakdownStyle}>
+            {formulaRegistry.map((f) => {
+              const secondArg = formulaSecondArg(f, spec.sale_price, targetGpPct);
+              const value = secondArg != null
+                ? f.compute(costs.modifiedCost, secondArg, vatRate)
+                : null;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setActiveFormulaId(f.id)}
+                  style={formulaRowStyle(f.id === activeFormulaId)}
+                  title={f.label}
+                >
+                  <span style={formulaLabelStyle}>{f.label}</span>
+                  <span style={formulaValueStyle}>
+                    {value != null ? `${f.unit === '£' ? '£' : ''}${value.toFixed(f.unit === '%' ? 1 : 2)}${f.unit !== '£' ? f.unit : ''}` : '—'}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -253,6 +289,45 @@ const gaugeDivider: React.CSSProperties = {
 
 const costDetailRowStyle: React.CSSProperties = {
   display: 'flex', justifyContent: 'space-around',
+};
+
+const targetRowStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  marginTop: 10, padding: '5px 0',
+  borderTop: '1px solid rgba(255,255,255,0.05)',
+};
+
+const targetLabelStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)', fontSize: 9, color: 'var(--mute)',
+  textTransform: 'uppercase', letterSpacing: '0.06em',
+};
+
+const targetValueStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink)', fontWeight: 500,
+};
+
+const formulaBreakdownStyle: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', gap: 2,
+  marginTop: 10, paddingTop: 10,
+  borderTop: '1px solid rgba(255,255,255,0.05)',
+};
+
+function formulaRowStyle(active: boolean): React.CSSProperties {
+  return {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    background: active ? 'rgba(127,230,255,0.08)' : 'transparent',
+    border: `1px solid ${active ? 'rgba(127,230,255,0.22)' : 'transparent'}`,
+    borderRadius: 5, cursor: 'pointer', padding: '4px 8px', textAlign: 'left',
+    width: '100%',
+  };
+}
+
+const formulaLabelStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--ink)',
+};
+
+const formulaValueStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--cyan)',
 };
 
 function statusBadgeStyle(status: string): React.CSSProperties {

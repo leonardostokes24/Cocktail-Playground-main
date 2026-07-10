@@ -1,5 +1,6 @@
+import Decimal from 'decimal.js';
 import { describe, it, expect } from 'vitest';
-import { dilutionFactor, finalVolume, finalAbv, exVat, gp } from './calculations';
+import { dilutionFactor, finalVolume, finalAbv, exVat, gp, applyModifiers, computeSpecCosts } from './calculations';
 import { toMl, fromMl } from './units';
 
 describe('dilutionFactor', () => {
@@ -94,4 +95,54 @@ describe('toMl', () => {
 describe('fromMl', () => {
   it('converts back to oz', () => { expect(fromMl(29.5735, 'oz')).toBeCloseTo(1); });
   it('converts back to cl', () => { expect(fromMl(50, 'cl')).toBe(5); });
+});
+
+describe('applyModifiers', () => {
+  it('applies sundries then waste %, in that order', () => {
+    // pourCost 2 + sundries 0.30 = 2.30, then *1.05 waste = 2.415
+    const result = applyModifiers(new Decimal(2), 0.30, 0.05);
+    expect(result.toNumber()).toBeCloseTo(2.415);
+  });
+  it('zero modifiers leave cost untouched', () => {
+    expect(applyModifiers(new Decimal(2), 0, 0).toNumber()).toBe(2);
+  });
+  it('accepts a pg-numeric string for sundries without precision loss', () => {
+    const result = applyModifiers(new Decimal('0.1'), '0.2', 0);
+    expect(result.toString()).toBe('0.3'); // would be 0.30000000000000004 under plain float math
+  });
+});
+
+describe('computeSpecCosts — modifier chain and dilution/cost independence', () => {
+  const components = [
+    { amount_ml: 50, ingredients: { cost_per_ml: '0.04', abv: 40 } }, // pg numeric arrives as string
+  ];
+
+  it('GP is computed off the modified cost, not the raw pour cost', () => {
+    // pourCost = 50 * 0.04 = 2. With sundries 0.30 + waste 5%: modifiedCost = 2.415
+    const withMods = computeSpecCosts('built', 12, components, {}, { sundriesPerServe: 0.30, wasteRate: 0.05 });
+    const withoutMods = computeSpecCosts('built', 12, components, {}, { sundriesPerServe: 0, wasteRate: 0 });
+    expect(withMods.pourCost).toBeCloseTo(2);
+    expect(withMods.modifiedCost).toBeCloseTo(2.415);
+    expect(withMods.gpPct).not.toBeCloseTo(withoutMods.gpPct!);
+    expect(gp(2.415, 12)).toBeCloseTo(withMods.gpPct!);
+  });
+
+  it('dilution changes volume/ABV but never the cost figures', () => {
+    const shaken = computeSpecCosts('shaken', 12, components, {}, { sundriesPerServe: 0.30, wasteRate: 0.05 });
+    const built = computeSpecCosts('built', 12, components, {}, { sundriesPerServe: 0.30, wasteRate: 0.05 });
+    expect(shaken.pourCost).toBe(built.pourCost);
+    expect(shaken.modifiedCost).toBe(built.modifiedCost);
+    expect(shaken.finalVolumeMl).not.toBe(built.finalVolumeMl);
+  });
+
+  it('zero-cost edge: no components yields zero cost, not NaN', () => {
+    const costs = computeSpecCosts('built', 12, [], {}, { sundriesPerServe: 0, wasteRate: 0.05 });
+    expect(costs.pourCost).toBe(0);
+    expect(costs.modifiedCost).toBe(0);
+  });
+
+  it('null sale price yields null GP rather than throwing', () => {
+    const costs = computeSpecCosts('built', null, components, {});
+    expect(costs.gpPct).toBeNull();
+  });
 });

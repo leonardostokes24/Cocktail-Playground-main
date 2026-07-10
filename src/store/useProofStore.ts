@@ -1,5 +1,7 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { DILUTION_DEFAULTS } from '../utils/calculations';
+import { DEFAULT_FORMULA_ID } from '../utils/formulaRegistry';
 import {
   listIngredients, insertIngredient, updateIngredient, deleteIngredient,
   listSpecs, insertSpec, updateSpec, deleteSpec,
@@ -77,11 +79,23 @@ interface ProofState {
   setDilutionOverride: (method: string, factor: number) => void;
   resetDilutionOverrides: () => void;
 
+  // ── Costing settings (persisted locally; never hard-coded) ────
+  vatRate: number;
+  sundriesPerServe: number;
+  wasteRate: number;
+  targetGpPct: number | null;
+  activeFormulaId: string;
+  setVatRate: (rate: number) => void;
+  setSundriesPerServe: (amount: number) => void;
+  setWasteRate: (rate: number) => void;
+  setTargetGpPct: (pct: number | null) => void;
+  setActiveFormulaId: (id: string) => void;
+
   // ── Phase 3 stubs ─────────────────────────────────────────────
   preps: unknown[];
 }
 
-export const useProofStore = create<ProofState>()((set, get) => ({
+export const useProofStore = create<ProofState>()(persist((set, get) => ({
   // ── Ingredients ──────────────────────────────────────────────
   ingredients: [],
   ingredientsLoading: false,
@@ -263,9 +277,33 @@ export const useProofStore = create<ProofState>()((set, get) => ({
     set((s) => ({ dilutionOverrides: { ...s.dilutionOverrides, [method]: factor } })),
   resetDilutionOverrides: () => set({ dilutionOverrides: {} }),
 
+  // ── Costing settings ────────────────────────────────────────────
+  vatRate: 0.20,
+  sundriesPerServe: 0,
+  wasteRate: 0.05,
+  targetGpPct: null,
+  activeFormulaId: DEFAULT_FORMULA_ID,
+  setVatRate: (rate) => set({ vatRate: rate }),
+  setSundriesPerServe: (amount) => set({ sundriesPerServe: amount }),
+  setWasteRate: (rate) => set({ wasteRate: rate }),
+  setTargetGpPct: (pct) => set({ targetGpPct: pct }),
+  setActiveFormulaId: (id) => set({ activeFormulaId: id }),
+
   // ── Stubs ─────────────────────────────────────────────────────
   preps: [],
-}));
+}),
+{
+  name: 'proof-settings',
+  partialize: (s) => ({
+    dilutionOverrides: s.dilutionOverrides,
+    vatRate: s.vatRate,
+    sundriesPerServe: s.sundriesPerServe,
+    wasteRate: s.wasteRate,
+    targetGpPct: s.targetGpPct,
+    activeFormulaId: s.activeFormulaId,
+  }),
+}
+));
 
 export type { Ingredient, IngredientInput, Spec, SpecInput, SpecComponent, SpecComponentInput, SpecCostRow };
 export { DILUTION_DEFAULTS };
