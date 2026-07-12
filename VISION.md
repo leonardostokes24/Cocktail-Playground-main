@@ -6,6 +6,11 @@ feature must ladder up to a goal here. This file is the *what & why*; `CLAUDE.md
 
 ---
 
+## Market position
+Proof occupies an **empty quadrant: creation-first + open/social**. Bar operations tools (Backbar, WISK, Partender) are inventory-first — recipes are cost objects for variance control, not creative artifacts. Cocktail reference/social apps (Difford's Guide, Kindred Cocktails, Untappd) are flat recipe lists — no branching, no lineage, no forking. Neither category has visual version-control or cross-creator forking with preserved attribution. That space is Proof's.
+
+---
+
 ## The end goal (one paragraph)
 Proof is an **open network for cocktail R&D**, built for working bartenders. You invent on a
 **private lineage canvas** — branch a riff off any spec and the family tree shows how the idea
