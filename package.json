@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:generate": "tsx scripts/generate-iba-seed.ts",
+    "seed:push": "tsx scripts/generate-iba-seed.ts --push"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
