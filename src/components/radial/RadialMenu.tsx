@@ -24,22 +24,24 @@ interface Props {
 // ── Segment definitions ───────────────────────────────────────────────────────
 
 const CANVAS_SEGMENTS: Segment[] = [
-  { id: 'new-spec',      label: 'New Spec',      icon: '✦',  color: 'rgba(127,230,255,0.7)' },
+  { id: 'new-spec',      label: 'New Spec',      icon: '✦' },
   { id: 'search-lib',   label: 'Library',        icon: '⌕',  disabled: true },
-  { id: 'quick-ingest', label: 'Ingest',          icon: '⇩',  disabled: true },
-  { id: 'new-prep',     label: 'New Prep',        icon: '⚗',  disabled: true },
+  { id: 'quick-ingest', label: 'Ingest',         icon: '⇩',  disabled: true },
+  { id: 'new-prep',     label: 'New Prep',       icon: '⚗',  disabled: true },
 ];
 
 const NODE_SEGMENTS: Segment[] = [
-  { id: 'branch',     label: 'Branch',         icon: '⎇',  color: 'rgba(127,230,255,0.7)' },
-  { id: 'add-ing',    label: 'Add Ingredient', icon: '+',   color: 'rgba(127,230,255,0.7)' },
-  { id: 'open-spec',  label: 'Open Spec',      icon: '→',   color: 'rgba(127,230,255,0.7)' },
-  { id: 'delete',     label: 'Delete',         icon: '✕',   color: 'rgba(255,100,100,0.7)' },
+  { id: 'branch',     label: 'Branch',         icon: '⎇' },
+  { id: 'add-ing',    label: 'Add',            icon: '+' },
+  { id: 'open-spec',  label: 'Open',           icon: '→' },
+  { id: 'duplicate',  label: 'Duplicate',      icon: '❑' },
+  { id: 'publish',    label: 'Publish',        icon: '↑' },
+  { id: 'delete',     label: 'Delete',         icon: '✕' },
 ];
 
 const CONFIRM_SEGMENTS: Segment[] = [
-  { id: 'confirm', label: 'Confirm Delete', icon: '✕', color: 'rgba(239,68,68,0.8)' },
-  { id: 'cancel',  label: 'Cancel',         icon: '←', color: 'rgba(127,230,255,0.7)' },
+  { id: 'confirm', label: 'Confirm Delete', icon: '✕' },
+  { id: 'cancel',  label: 'Cancel',         icon: '←' },
 ];
 
 const CATEGORY_SEGMENTS: Segment[] = [
@@ -73,9 +75,15 @@ export default function RadialMenu({ context, onClose }: Props) {
   const addComponent    = useProofStore(s => s.addComponent);
   const selectSpec      = useProofStore(s => s.selectSpec);
   const removeSpec      = useProofStore(s => s.removeSpec);
+  const publishSpec     = useProofStore(s => s.publishSpec);
   const specs           = useProofStore(s => s.specs);
 
-  const { position } = context;
+  // Clamp so the wheel (≈320px across) stays inside the viewport
+  const HALF = 145;
+  const MARGIN = 20;
+  const clampedX = Math.max(HALF + MARGIN, Math.min(window.innerWidth  - HALF - MARGIN, context.position.x));
+  const clampedY = Math.max(HALF + MARGIN, Math.min(window.innerHeight - HALF - MARGIN, context.position.y));
+  const position = { x: clampedX, y: clampedY };
   const nodeId = context.kind === 'node' ? context.nodeId : null;
 
   const goBack = useCallback(() => {
@@ -115,7 +123,36 @@ export default function RadialMenu({ context, onClose }: Props) {
     if (id === 'open-spec') { selectSpec(nodeId); onClose(); }
     if (id === 'add-ing')   { setPhase({ tag: 'sub-ring' }); }
     if (id === 'delete')    { setPhase({ tag: 'confirm-delete' }); }
-  }, [nodeId, branchSpec, selectSpec, onClose]);
+    if (id === 'publish')   { await publishSpec(nodeId); onClose(); }
+    if (id === 'duplicate') {
+      const parent = specs.find(s => s.id === nodeId);
+      if (!parent) return;
+      const copy = await createSpec({
+        name: `${parent.name} copy`,
+        method: parent.method,
+        glass: parent.glass,
+        garnish: parent.garnish,
+        build_text: parent.build_text,
+        sale_price: parent.sale_price,
+        canvas_x: parent.canvas_x + 280,
+        canvas_y: parent.canvas_y - 60,
+      });
+      const parentComponents = specComponentsMap[nodeId] ?? [];
+      for (const comp of parentComponents) {
+        await addComponent({
+          spec_id: copy.id,
+          ingredient_id: comp.ingredient_id,
+          prep_id: comp.prep_id,
+          amount_ml: comp.amount_ml,
+          original_amount: comp.original_amount,
+          original_unit: comp.original_unit,
+          position: comp.position,
+        });
+      }
+      selectSpec(copy.id);
+      onClose();
+    }
+  }, [nodeId, branchSpec, selectSpec, publishSpec, createSpec, addComponent, specComponentsMap, specs, onClose]);
 
   // ── Sub-ring: category ────────────────────────────────────────────────────
   const handleCategorySelect = useCallback((catId: string) => {
@@ -172,7 +209,8 @@ export default function RadialMenu({ context, onClose }: Props) {
 
   const showSearch = phase.tag === 'search';
   const showAmount = phase.tag === 'add-amount';
-  const showRing   = !showSearch;
+  const showDeleteConfirm = phase.tag === 'confirm-delete';
+  const showRing = !showSearch;
 
   return (
     <>
@@ -186,17 +224,19 @@ export default function RadialMenu({ context, onClose }: Props) {
       {/* Wheel container */}
       <div style={{ ...wheel, left: position.x, top: position.y }} onClick={e => e.stopPropagation()}>
 
+        {/* Ring backdrop disc */}
+        <div style={backdropRing} />
+
         {showRing && (
           <RadialRing
             segments={currentSegments}
             onSelect={handleSelect}
             onEscape={handleEscape}
-            radius={phase.tag === 'sub-ring' ? 110 : 96}
-            size={phase.tag === 'sub-ring' ? 68 : 64}
+            radius={phase.tag === 'sub-ring' ? 128 : 118}
           />
         )}
 
-        {/* Centre content */}
+        {/* Centre hub */}
         <div style={centre}>
           {showSearch && phase.tag === 'search' && (
             <RadialSearch
@@ -233,11 +273,24 @@ export default function RadialMenu({ context, onClose }: Props) {
             </div>
           )}
 
+          {/* Default centre: type-ahead search input */}
           {!showSearch && !showAmount && (
-            <div style={centreLabel}>
-              {context.kind === 'canvas' && <span style={centreTip}>Right-click</span>}
-              {phase.tag === 'confirm-delete' && <span style={{ ...centreTip, color: '#f87171' }}>Delete?</span>}
-              {phase.tag === 'sub-ring' && <span style={centreTip}>Category</span>}
+            <div style={centrePill}>
+              {showDeleteConfirm ? (
+                <span style={{ font: '600 12px var(--font-ui)', color: 'rgba(255,150,150,.9)', textAlign: 'center' as const }}>
+                  Delete?
+                </span>
+              ) : (
+                <>
+                  <div style={{ font: '500 12px var(--font-ui)', color: 'rgba(230,228,245,.85)', textAlign: 'center' as const }}>
+                    <span style={{ opacity: 0.5 }}>search</span>
+                    <span style={{ display: 'inline-block', width: 1, height: 13, background: '#7FE6FF', marginLeft: 2, verticalAlign: 'middle' }} />
+                  </div>
+                  <div style={{ font: '500 8.5px var(--font-ui)', color: 'rgba(230,228,245,.4)', marginTop: 3, letterSpacing: '0.04em', textAlign: 'center' as const }}>
+                    search · type to filter ring
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -252,6 +305,20 @@ const backdrop: React.CSSProperties = {
   position: 'fixed', inset: 0, zIndex: 2000,
 };
 
+const backdropRing: React.CSSProperties = {
+  position: 'absolute',
+  width: 290,
+  height: 290,
+  borderRadius: '50%',
+  transform: 'translate(-50%, -50%)',
+  background: 'radial-gradient(circle, rgba(12,11,20,.2), rgba(12,11,20,.55))',
+  border: '1px solid rgba(255,255,255,.08)',
+  backdropFilter: 'blur(6px)',
+  WebkitBackdropFilter: 'blur(6px)',
+  pointerEvents: 'none',
+  zIndex: -1,
+};
+
 const wheel: React.CSSProperties = {
   position: 'fixed',
   zIndex: 2001,
@@ -263,24 +330,19 @@ const centre: React.CSSProperties = {
   position: 'absolute',
   top: '50%',
   left: '50%',
-  transform: 'translate(-50%, -50%)',
   pointerEvents: 'all',
 };
 
-const centreLabel: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 54, height: 54,
-  background: 'linear-gradient(168deg, rgba(255,255,255,.07), rgba(255,255,255,.02))',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  border: '1px solid var(--glass-border)',
-  borderRadius: '50%',
-  boxShadow: 'inset 1px 0 0 var(--edge-cyan), inset -1px 0 0 var(--edge-magenta)',
-};
-
-const centreTip: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700,
-  color: 'var(--mute)', letterSpacing: '0.04em', textAlign: 'center',
+const centrePill: React.CSSProperties = {
+  width: 150,
+  padding: '11px 14px',
+  borderRadius: 12,
+  background: 'linear-gradient(168deg, rgba(255,255,255,.1), rgba(255,255,255,.04))',
+  backdropFilter: 'blur(24px) saturate(135%)',
+  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
+  border: '1px solid rgba(255,255,255,.16)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.24), inset 1.2px 0 0 rgba(120,225,255,.42), inset -1.2px 0 0 rgba(255,135,210,.36), 0 18px 36px -16px rgba(0,0,0,.8)',
+  transform: 'translate(-50%, -50%)',
 };
 
 const amountBox: React.CSSProperties = {
@@ -288,12 +350,12 @@ const amountBox: React.CSSProperties = {
   background: 'linear-gradient(168deg, rgba(255,255,255,.10), rgba(255,255,255,.04))',
   backdropFilter: 'blur(24px) saturate(135%)',
   WebkitBackdropFilter: 'blur(24px) saturate(135%)',
-  border: '1px solid var(--glass-border)',
-  boxShadow: 'inset 1px 0 0 var(--edge-cyan), inset -1px 0 0 var(--edge-magenta), inset 0 1px 0 var(--edge-top), 0 16px 40px rgba(0,0,0,.6)',
+  border: '1px solid rgba(255,255,255,.16)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.24), inset 1.2px 0 0 rgba(120,225,255,.42), inset -1.2px 0 0 rgba(255,135,210,.36), 0 18px 36px -16px rgba(0,0,0,.8)',
   borderRadius: 12,
   padding: '12px 14px',
   width: 180,
-  transform: 'translateY(-50%)',
+  transform: 'translate(-50%, -50%)',
 };
 
 const amountName: React.CSSProperties = {

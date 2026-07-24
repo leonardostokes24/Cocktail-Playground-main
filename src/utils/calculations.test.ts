@@ -146,3 +146,43 @@ describe('computeSpecCosts — modifier chain and dilution/cost independence', (
     expect(costs.gpPct).toBeNull();
   });
 });
+
+describe('computeSpecCosts — optional pricing (unpriced components)', () => {
+  it('a fully priced spec reports fullyPriced and a GP', () => {
+    const costs = computeSpecCosts('built', 12, [{ amount_ml: 50, ingredients: { cost_per_ml: '0.04', abv: 40 } }], {});
+    expect(costs.unpricedCount).toBe(0);
+    expect(costs.fullyPriced).toBe(true);
+    expect(costs.gpPct).not.toBeNull();
+  });
+
+  it('a null cost_per_ml counts as unpriced and suppresses GP even with a sale price', () => {
+    const costs = computeSpecCosts('built', 12, [{ amount_ml: 50, ingredients: { cost_per_ml: null, abv: 40 } }], {});
+    expect(costs.unpricedCount).toBe(1);
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.gpPct).toBeNull();
+  });
+
+  it('a mix of priced and unpriced sums only the priced cost and stays not-fully-priced', () => {
+    const costs = computeSpecCosts('built', 12, [
+      { amount_ml: 50, ingredients: { cost_per_ml: '0.04', abv: 40 } }, // 2.00
+      { amount_ml: 20, ingredients: { cost_per_ml: null, abv: 0 } },    // unpriced → 0
+    ], {});
+    expect(costs.pourCost).toBeCloseTo(2);
+    expect(costs.unpricedCount).toBe(1);
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.gpPct).toBeNull();
+  });
+
+  it('a legitimate zero price is priced (not unpriced) and still yields a GP', () => {
+    const costs = computeSpecCosts('built', 12, [{ amount_ml: 50, ingredients: { cost_per_ml: 0, abv: 0 } }], {});
+    expect(costs.unpricedCount).toBe(0);
+    expect(costs.fullyPriced).toBe(true);
+    expect(costs.gpPct).not.toBeNull();
+  });
+
+  it('an empty spec is not "fully priced" (nothing to price)', () => {
+    const costs = computeSpecCosts('built', 12, [], {});
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.gpPct).toBeNull();
+  });
+});

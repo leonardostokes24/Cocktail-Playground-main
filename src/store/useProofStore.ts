@@ -13,6 +13,14 @@ import {
   type SpecComponent, type SpecComponentInput,
   type SpecCostRow,
 } from '../lib/supabase/queries';
+import {
+  listCatalogueIngredients, searchCatalogueIngredients, importCatalogueIngredient,
+  type CatalogueIngredient,
+} from '../lib/supabase/catalogue';
+import {
+  listPublishedFeed, searchPublished, insertPublishedSpec, forkPublishedSpec,
+  type PublishedSpec, type ComponentSnapshot,
+} from '../lib/supabase/published';
 
 function groupBySpecId(components: SpecComponent[]): Record<string, SpecComponent[]> {
   const map: Record<string, SpecComponent[]> = {};
@@ -90,6 +98,26 @@ interface ProofState {
   setWasteRate: (rate: number) => void;
   setTargetGpPct: (pct: number | null) => void;
   setActiveFormulaId: (id: string) => void;
+
+  // ── Catalogue (world-readable, no auth required) ──────────────
+  catalogueIngredients: CatalogueIngredient[];
+  catalogueLoading: boolean;
+  loadCatalogueIngredients: () => Promise<void>;
+  searchCatalogueIngredients: (q: string, type?: string) => Promise<CatalogueIngredient[]>;
+  importCatalogueIngredient: (catalogueId: string, packCost?: number | null, packSizeMl?: number) => Promise<Ingredient>;
+
+  // ── Commons feed ──────────────────────────────────────────────
+  publishedFeed: PublishedSpec[];
+  publishedFeedLoading: boolean;
+  publishedFeedLoaded: boolean;
+  loadPublishedFeed: () => Promise<void>;
+  searchPublishedFeed: (q: string) => Promise<void>;
+
+  // ── Publish + fork ────────────────────────────────────────────
+  publishSpec: (specId: string) => Promise<void>;
+  forkPublished: (publishedId: string) => Promise<Spec>;
+  // Fork several published specs onto the canvas at once, laid out on a grid.
+  preloadPublished: (publishedIds: string[]) => Promise<void>;
 
   // ── Phase 3 stubs ─────────────────────────────────────────────
   preps: unknown[];
@@ -289,6 +317,145 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
   setTargetGpPct: (pct) => set({ targetGpPct: pct }),
   setActiveFormulaId: (id) => set({ activeFormulaId: id }),
 
+  // ── Catalogue ─────────────────────────────────────────────────
+  catalogueIngredients: [],
+  catalogueLoading: false,
+  loadCatalogueIngredients: async () => {
+    if (get().catalogueIngredients.length > 0) return; // already loaded
+    set({ catalogueLoading: true });
+    try {
+      set({ catalogueIngredients: await listCatalogueIngredients(), catalogueLoading: false });
+    } catch {
+      set({ catalogueLoading: false });
+    }
+  },
+  searchCatalogueIngredients: async (q, type) => {
+    return searchCatalogueIngredients(q, type);
+  },
+  importCatalogueIngredient: async (catalogueId, packCost, packSizeMl) => {
+    const ing = await importCatalogueIngredient(catalogueId, packCost, packSizeMl);
+    // find-or-create may return an existing row — upsert into the list, don't duplicate.
+    set((s) => ({
+      ingredients: [...s.ingredients.filter((i) => i.id !== ing.id), ing]
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    }));
+    return ing;
+  },
+
+  // ── Commons feed ──────────────────────────────────────────────
+  publishedFeed: [],
+  publishedFeedLoading: false,
+  publishedFeedLoaded: false,
+  loadPublishedFeed: async () => {
+    set({ publishedFeedLoading: true });
+    try {
+      set({ publishedFeed: await listPublishedFeed(50, 0), publishedFeedLoading: false, publishedFeedLoaded: true });
+    } catch {
+      set({ publishedFeedLoading: false });
+    }
+  },
+  searchPublishedFeed: async (q) => {
+    set({ publishedFeedLoading: true });
+    try {
+      set({ publishedFeed: await searchPublished(q), publishedFeedLoading: false });
+    } catch {
+      set({ publishedFeedLoading: false });
+    }
+  },
+
+  // ── Publish + fork ────────────────────────────────────────────
+  publishSpec: async (specId) => {
+    const { specs, specComponentsMap, vatRate } = get();
+    const spec = specs.find((s) => s.id === specId);
+    if (!spec) throw new Error('Spec not found');
+
+    const components = specComponentsMap[specId] ?? [];
+    const snapshot: ComponentSnapshot[] = components.map((c) => ({
+      name: c.ingredients?.name ?? 'Unknown',
+      amount_ml: c.amount_ml,
+      original_amount: c.original_amount ?? c.amount_ml,
+      original_unit: c.original_unit ?? 'ml',
+      type: c.ingredients?.type ?? 'other',
+      catalogue_id: null,
+      abv: c.ingredients?.abv ?? 0,
+      cost_per_ml_at_publish: c.ingredients?.cost_per_ml ?? null,
+    }));
+
+    await insertPublishedSpec({
+      specId,
+      name: spec.name,
+      method: spec.method,
+      glass: spec.glass,
+      garnish: spec.garnish,
+      buildText: spec.build_text,
+      changeNote: spec.change_note,
+      componentsSnapshot: snapshot,
+      // Carry cross-user lineage forward: if this spec was forked from a published
+      // one, the new published row must point back at it so get_spec_lineage() can
+      // traverse the full ancestry. Originals stay null.
+      forkedFromId: spec.forked_from_published_id ?? null,
+      venueId: null,
+    });
+
+    // Mark spec as published in local state
+    await get().editSpec(specId, { status: 'published' });
+  },
+  forkPublished: async (publishedId) => {
+    const { newSpecId, componentsSnapshot } = await forkPublishedSpec(publishedId);
+
+    // Re-fetch the new spec row.
+    const updatedSpecs = await listSpecs().catch(() => get().specs);
+    const newSpec = updatedSpecs.find((s) => s.id === newSpecId);
+    if (!newSpec) throw new Error('Forked spec not found after insert');
+
+    // Resolve each snapshot component to one of the user's own ingredients — unpriced
+    // by default, since pricing is optional. catalogue_id gives an exact match;
+    // otherwise fall back to a name match, else create a new unpriced ingredient.
+    const resolveIngredientId = async (cs: ComponentSnapshot): Promise<string> => {
+      if (cs.catalogue_id) return (await get().importCatalogueIngredient(cs.catalogue_id)).id;
+      const existing = get().ingredients.find((i) => i.name.toLowerCase() === cs.name.toLowerCase());
+      if (existing) return existing.id;
+      const created = await insertIngredient({
+        name: cs.name, type: cs.type ?? null, abv: cs.abv ?? 0, pack_size_ml: 700, pack_cost: null,
+      });
+      set((s) => ({ ingredients: [...s.ingredients, created].sort((a, b) => a.name.localeCompare(b.name)) }));
+      return created.id;
+    };
+
+    // Insert real, editable components (replacing the old display-only placeholders).
+    const realComponents: SpecComponent[] = [];
+    let position = 0;
+    for (const cs of componentsSnapshot) {
+      const ingredientId = await resolveIngredientId(cs);
+      realComponents.push(await insertSpecComponent({
+        spec_id: newSpecId,
+        ingredient_id: ingredientId,
+        amount_ml: cs.amount_ml,
+        original_amount: cs.original_amount,
+        original_unit: cs.original_unit,
+        position: position++,
+      }));
+    }
+
+    set((s) => ({
+      specs: [newSpec, ...s.specs],
+      specComponentsMap: { ...s.specComponentsMap, [newSpecId]: realComponents },
+    }));
+    get().selectSpec(newSpecId);
+    return newSpec;
+  },
+  preloadPublished: async (publishedIds) => {
+    // Lay forked specs out on a grid to the right of any existing specs.
+    const baseX = get().specs.length ? Math.max(...get().specs.map((s) => s.canvas_x)) + 320 : 100;
+    let i = 0;
+    for (const id of publishedIds) {
+      const spec = await get().forkPublished(id);
+      await get().editSpec(spec.id, { canvas_x: baseX + (i % 4) * 300, canvas_y: 120 + Math.floor(i / 4) * 260 });
+      i++;
+    }
+    get().selectSpec(null); // don't leave the last one's panel open after a batch add
+  },
+
   // ── Stubs ─────────────────────────────────────────────────────
   preps: [],
 }),
@@ -306,4 +473,5 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
 ));
 
 export type { Ingredient, IngredientInput, Spec, SpecInput, SpecComponent, SpecComponentInput, SpecCostRow };
+export type { CatalogueIngredient, PublishedSpec, ComponentSnapshot };
 export { DILUTION_DEFAULTS };

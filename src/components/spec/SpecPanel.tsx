@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useProofStore } from '../../store/useProofStore';
 import { computeSpecCosts } from '../../utils/calculations';
 import { formulaRegistry, formulaSecondArg } from '../../utils/formulaRegistry';
@@ -16,10 +16,15 @@ export default function SpecPanel({ specId, onClose }: Props) {
     specs, specComponents, componentsLoading, ingredients, dilutionOverrides,
     vatRate, sundriesPerServe, wasteRate, targetGpPct, activeFormulaId,
     editSpec, addComponent, editComponent, removeComponent, setActiveFormulaId,
+    branchSpec, publishSpec,
+    catalogueIngredients, loadCatalogueIngredients, importCatalogueIngredient,
   } = useProofStore();
+
+  useEffect(() => { loadCatalogueIngredients(); }, [loadCatalogueIngredients]);
   const [addingComponent, setAddingComponent] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+  const [publishing, setPublishing] = useState(false);
 
   const spec = specs.find((s) => s.id === specId);
   const costs = useMemo(() =>
@@ -48,18 +53,34 @@ export default function SpecPanel({ specId, onClose }: Props) {
     setAddingComponent(false);
   }, [addComponent]);
 
+  const handleBranch = useCallback(async () => {
+    await branchSpec(specId);
+  }, [branchSpec, specId]);
+
+  const handlePublish = useCallback(async () => {
+    if (publishing) return;
+    setPublishing(true);
+    try {
+      await publishSpec(specId);
+    } finally {
+      setPublishing(false);
+    }
+  }, [publishSpec, specId, publishing]);
+
   if (!spec) return null;
 
   const subtitle = [spec.method, spec.glass].filter(Boolean).join(' · ');
+  const gpVal = costs?.gpPct != null ? costs.gpPct.toFixed(1) : '—';
 
   return (
-    <div style={panelStyle}>
-      {/* ── Header ───────────────────────────────────────────── */}
+    <div style={panelOuter}>
+      {/* ── Header ─────────────────────────────────────────────── */}
       <div style={headerStyle}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {editingName ? (
             <input
               autoFocus
+              className="display"
               style={nameInputStyle}
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
@@ -70,17 +91,31 @@ export default function SpecPanel({ specId, onClose }: Props) {
               }}
             />
           ) : (
-            <h2 style={nameTitleStyle} onClick={() => { setNameDraft(spec.name); setEditingName(true); }} title="Click to rename">
+            <h2
+              className="display"
+              style={nameTitleStyle}
+              onClick={() => { setNameDraft(spec.name); setEditingName(true); }}
+              title="Click to rename"
+            >
               {spec.name}
             </h2>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            {subtitle && <span style={subtitleStyle}>{subtitle.toUpperCase()}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+            {subtitle && <span style={subtitleStyle}>{subtitle}</span>}
             <span style={statusBadgeStyle(spec.status)}>{spec.status}</span>
           </div>
         </div>
         <button onClick={onClose} style={closeBtnStyle}>✕</button>
       </div>
+
+      {/* ── 3-up gauge strip ──────────────────────────────────── */}
+      {costs && (
+        <div style={gaugeStrip}>
+          <GaugeTile label="GP" value={gpVal} unit="%" accent />
+          <GaugeTile label="ABV" value={costs.finalAbvPct.toFixed(1)} unit="%" />
+          <GaugeTile label="VOL" value={costs.finalVolumeMl.toFixed(0)} unit="ml" />
+        </div>
+      )}
 
       {/* ── Scrollable body ───────────────────────────────────── */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -89,9 +124,10 @@ export default function SpecPanel({ specId, onClose }: Props) {
           <SpecFields spec={spec} onSave={handleSaveField} />
         </section>
 
+        {/* BUILD section */}
         <section style={sectionStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <p style={{ ...sectionLabel, margin: 0 }}>Ingredients</p>
+            <p style={{ ...sectionLabel, margin: 0 }}>Build</p>
             {!addingComponent && (
               <button onClick={() => setAddingComponent(true)} style={addBtnStyle}>+ Add</button>
             )}
@@ -101,6 +137,8 @@ export default function SpecPanel({ specId, onClose }: Props) {
             <div style={{ marginBottom: 12 }}>
               <AddComponentForm
                 ingredients={ingredients}
+                catalogueIngredients={catalogueIngredients}
+                onResolveCatalogue={importCatalogueIngredient}
                 nextPosition={specComponents.length}
                 specId={specId}
                 onAdd={handleAddComponent}
@@ -121,214 +159,277 @@ export default function SpecPanel({ specId, onClose }: Props) {
             </div>
           )}
         </section>
+
+        {/* COSTING block — pricing is optional; the breakdown appears once priced */}
+        {costs && (
+          <section style={sectionStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <p style={{ ...sectionLabel, margin: 0 }}>Costing</p>
+              {costs.fullyPriced && (
+                <span style={costSummaryStyle}>
+                  pour £{costs.pourCost.toFixed(3)} · +£{costs.modifiedCost.toFixed(3)} modified
+                </span>
+              )}
+            </div>
+
+            {!costs.fullyPriced ? (
+              <div style={unpricedNote}>
+                <p style={{ margin: 0, fontFamily: 'var(--font-ui)', fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                  Pricing is optional
+                </p>
+                <p style={{ margin: '4px 0 0', fontFamily: 'var(--font-ui)', fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  {costs.unpricedCount} ingredient{costs.unpricedCount !== 1 ? 's' : ''} {costs.unpricedCount === 1 ? 'has' : 'have'} no price yet. Add prices in the Library to see GP and the full breakdown.
+                </p>
+              </div>
+            ) : (
+            <div style={costingCard}>
+              {formulaRegistry.map((f) => {
+                const secondArg = formulaSecondArg(f, spec.sale_price, targetGpPct);
+                const value = secondArg != null
+                  ? f.compute(costs.modifiedCost, secondArg, vatRate)
+                  : null;
+                const isActive = f.id === activeFormulaId;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => setActiveFormulaId(f.id)}
+                    style={formulaRowStyle(isActive)}
+                    title={f.label}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {isActive && <span style={activeFormulaChip}>headline</span>}
+                      <span style={formulaLabelStyle}>{f.label}</span>
+                    </div>
+                    <span style={formulaValueStyle}>
+                      {value != null
+                        ? `${f.unit === '£' ? '£' : ''}${value.toFixed(f.unit === '%' ? 1 : 2)}${f.unit !== '£' ? f.unit : ''}`
+                        : '—'}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {targetGpPct != null && costs.gpPct != null && (
+                <div style={targetRow}>
+                  <span style={targetLabelStyle}>Realized GP</span>
+                  <span style={targetValueStyle}>{costs.gpPct.toFixed(1)}%</span>
+                  <span style={targetLabelStyle}>vs target</span>
+                  <span style={targetValueStyle}>{targetGpPct.toFixed(1)}%</span>
+                </div>
+              )}
+            </div>
+            )}
+          </section>
+        )}
       </div>
 
-      {/* ── Pinned cost gauges ────────────────────────────────── */}
-      {costs && (
-        <div style={costBarStyle}>
-          <div style={gaugeRowStyle}>
-            <Gauge
-              label="GP"
-              value={costs.gpPct != null ? costs.gpPct.toFixed(1) : '—'}
-              unit="%"
-              accent={costs.gpPct != null}
-            />
-            <div style={gaugeDivider} />
-            <Gauge label="ABV" value={costs.finalAbvPct.toFixed(1)} unit="%" />
-            <div style={gaugeDivider} />
-            <Gauge label="VOL" value={costs.finalVolumeMl.toFixed(0)} unit="ml" />
-          </div>
-          <div style={costDetailRowStyle}>
-            <CostDetail label="Pour cost" value={`£${costs.pourCost.toFixed(3)}`} />
-            <CostDetail label="Modified cost" value={`£${costs.modifiedCost.toFixed(3)}`} />
-            <CostDetail label="Liquid" value={`${costs.liquidVolumeMl.toFixed(0)} ml`} />
-            <CostDetail label="Pre-dil ABV" value={`${costs.preDilutionAbv.toFixed(1)}%`} />
-          </div>
-
-          {targetGpPct != null && costs.gpPct != null && (
-            <div style={targetRowStyle}>
-              <span style={targetLabelStyle}>Realized GP</span>
-              <span style={targetValueStyle}>{costs.gpPct.toFixed(1)}%</span>
-              <span style={targetLabelStyle}>vs target</span>
-              <span style={targetValueStyle}>{targetGpPct.toFixed(1)}%</span>
-            </div>
-          )}
-
-          <div style={formulaBreakdownStyle}>
-            {formulaRegistry.map((f) => {
-              const secondArg = formulaSecondArg(f, spec.sale_price, targetGpPct);
-              const value = secondArg != null
-                ? f.compute(costs.modifiedCost, secondArg, vatRate)
-                : null;
-              return (
-                <button
-                  key={f.id}
-                  onClick={() => setActiveFormulaId(f.id)}
-                  style={formulaRowStyle(f.id === activeFormulaId)}
-                  title={f.label}
-                >
-                  <span style={formulaLabelStyle}>{f.label}</span>
-                  <span style={formulaValueStyle}>
-                    {value != null ? `${f.unit === '£' ? '£' : ''}${value.toFixed(f.unit === '%' ? 1 : 2)}${f.unit !== '£' ? f.unit : ''}` : '—'}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* ── Footer: Branch + Publish ─────────────────────────── */}
+      <div style={footerStyle}>
+        <button onClick={handleBranch} style={branchBtnStyle}>⎇ Branch</button>
+        <button
+          disabled={spec.status === 'published' || publishing}
+          onClick={handlePublish}
+          style={publishBtnStyle(spec.status === 'published' || publishing)}
+        >
+          {publishing ? 'Publishing…' : spec.status === 'published' ? '✓ Published' : '↑ Publish to commons'}
+        </button>
+      </div>
     </div>
   );
 }
 
-function Gauge({ label, value, unit, accent }: { label: string; value: string; unit: string; accent?: boolean }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: 1 }}>
-      <span style={{ fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700, color: 'var(--mute)', letterSpacing: '0.09em', textTransform: 'uppercase' as const }}>
-        {label}
-      </span>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 500, color: accent ? 'var(--cyan)' : 'var(--ink)', lineHeight: 1 }}>
-        {value}
-        {value !== '—' && <span style={{ fontSize: 12, color: 'var(--cyan)', marginLeft: 2 }}>{unit}</span>}
-      </span>
-    </div>
-  );
-}
+// ── Sub-components ────────────────────────────────────────────────────────────
 
-function CostDetail({ label, value }: { label: string; value: string }) {
+function GaugeTile({ label, value, unit, accent }: { label: string; value: string; unit: string; accent?: boolean }) {
   return (
-    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-      <span style={{ fontFamily: 'var(--font-ui)', fontSize: 9, color: 'var(--mute)', fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>{label}</span>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink)' }}>{value}</span>
-    </span>
+    <div style={gaugeTile}>
+      <span style={gaugeTileLabel}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
+        <span style={{ ...gaugeTileNum, color: accent ? 'var(--cyan)' : 'var(--text)' }}>{value}</span>
+        {value !== '—' && <span style={gaugeTileUnit}>{unit}</span>}
+      </div>
+    </div>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const panelStyle: React.CSSProperties = {
+const panelOuter: React.CSSProperties = {
   position: 'fixed', top: 0, right: 0, bottom: 0, width: 560,
-  background: 'linear-gradient(168deg, rgba(255,255,255,.10), rgba(255,255,255,.04))',
-  backdropFilter: 'blur(24px) saturate(135%)',
-  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
-  borderLeft: '1px solid var(--glass-border)',
-  boxShadow: 'inset 1px 0 0 var(--edge-cyan), inset 0 1px 0 var(--edge-top), -14px 0 48px rgba(0,0,0,.65)',
+  background: 'var(--panel-fill)',
+  backdropFilter: 'var(--glass-blur)',
+  WebkitBackdropFilter: 'var(--glass-blur)',
+  borderLeft: '1px solid rgba(255,255,255,.12)',
+  boxShadow: 'inset 1px 0 0 var(--panel-edge-cyan), inset 0 1px 0 rgba(255,255,255,.16), -14px 0 48px rgba(0,0,0,.65)',
   zIndex: 3100,
-  display: 'flex', flexDirection: 'column',
+  display: 'flex',
+  flexDirection: 'column',
 };
 
 const headerStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'flex-start', gap: 12,
-  padding: '18px 20px 14px',
-  borderBottom: '1px solid rgba(255,255,255,0.07)',
+  padding: '20px 22px 16px',
+  borderBottom: '1px solid rgba(255,255,255,.07)',
   flexShrink: 0,
 };
 
 const nameTitleStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700,
-  color: 'var(--ink)', margin: 0, cursor: 'text', lineHeight: 1.15,
-  textShadow: 'var(--aberration)',
+  fontSize: 26, margin: 0, cursor: 'text', lineHeight: 1.1,
 };
 
 const nameInputStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700,
-  background: 'transparent', border: 'none', borderBottom: '1px solid var(--cyan)',
-  color: 'var(--ink)', outline: 'none', width: '100%',
-  textShadow: 'var(--aberration)',
+  fontSize: 26, background: 'transparent', border: 'none',
+  borderBottom: '1px solid var(--cyan)', outline: 'none', width: '100%',
 };
 
 const subtitleStyle: React.CSSProperties = {
   fontFamily: 'var(--font-ui)', fontSize: 10, fontWeight: 500,
-  color: 'var(--mute)', letterSpacing: '0.07em',
+  color: 'var(--text-muted)', letterSpacing: '0.05em',
 };
 
 const closeBtnStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
-  borderRadius: 6, color: 'var(--mute)', cursor: 'pointer',
+  background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.12)',
+  borderRadius: 6, color: 'var(--text-muted)', cursor: 'pointer',
   fontFamily: 'var(--font-ui)', fontSize: 13, padding: '5px 10px', flexShrink: 0,
 };
 
+const gaugeStrip: React.CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  padding: '12px 22px',
+  borderBottom: '1px solid rgba(255,255,255,.06)',
+  flexShrink: 0,
+};
+
+const gaugeTile: React.CSSProperties = {
+  flex: 1,
+  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+  background: 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.08)',
+  borderRadius: 10,
+  padding: '10px 8px',
+};
+
+const gaugeTileLabel: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700,
+  color: 'var(--text-muted)', letterSpacing: '0.09em', textTransform: 'uppercase',
+};
+
+const gaugeTileNum: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 500, lineHeight: 1,
+};
+
+const gaugeTileUnit: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--cyan)',
+};
+
 const sectionStyle: React.CSSProperties = {
-  padding: '16px 20px',
-  borderBottom: '1px solid rgba(255,255,255,0.05)',
+  padding: '16px 22px',
+  borderBottom: '1px solid rgba(255,255,255,.05)',
 };
 
 const sectionLabel: React.CSSProperties = {
   fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700,
-  color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.10em',
+  color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.10em',
   marginBottom: 10, margin: '0 0 10px',
 };
 
 const addBtnStyle: React.CSSProperties = {
-  background: 'rgba(127,230,255,0.08)', border: '1px solid rgba(127,230,255,0.22)',
+  background: 'rgba(127,230,255,.08)', border: '1px solid rgba(127,230,255,.22)',
   borderRadius: 6, color: 'var(--cyan)', cursor: 'pointer',
   fontFamily: 'var(--font-ui)', fontSize: 11, fontWeight: 700, padding: '3px 10px',
 };
 
 const dimStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--mute)', margin: 0,
+  fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--text-muted)', margin: 0,
 };
 
-const costBarStyle: React.CSSProperties = {
-  padding: '14px 20px 16px',
-  borderTop: '1px solid rgba(255,255,255,0.07)',
-  background: 'rgba(0,0,0,0.15)',
-  flexShrink: 0,
+const costSummaryStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)',
 };
 
-const gaugeRowStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center',
-  marginBottom: 10,
+const costingCard: React.CSSProperties = {
+  background: 'rgba(0,0,0,.28)',
+  border: '1px solid rgba(255,255,255,.07)',
+  borderRadius: 10,
+  padding: '4px 6px',
+  display: 'flex', flexDirection: 'column', gap: 1,
 };
 
-const gaugeDivider: React.CSSProperties = {
-  width: 1, height: 36,
-  background: 'rgba(255,255,255,0.08)',
-  flexShrink: 0,
+const unpricedNote: React.CSSProperties = {
+  background: 'rgba(255,255,255,.03)',
+  border: '1px dashed rgba(255,255,255,.12)',
+  borderRadius: 10,
+  padding: '12px 14px',
 };
 
-const costDetailRowStyle: React.CSSProperties = {
-  display: 'flex', justifyContent: 'space-around',
-};
-
-const targetRowStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-  marginTop: 10, padding: '5px 0',
-  borderTop: '1px solid rgba(255,255,255,0.05)',
-};
-
-const targetLabelStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)', fontSize: 9, color: 'var(--mute)',
-  textTransform: 'uppercase', letterSpacing: '0.06em',
-};
-
-const targetValueStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink)', fontWeight: 500,
-};
-
-const formulaBreakdownStyle: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 2,
-  marginTop: 10, paddingTop: 10,
-  borderTop: '1px solid rgba(255,255,255,0.05)',
+const activeFormulaChip: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)', fontSize: 7, fontWeight: 700,
+  color: 'var(--cyan)', background: 'rgba(127,230,255,.12)',
+  border: '1px solid rgba(127,230,255,.3)',
+  borderRadius: 4, padding: '1px 5px', letterSpacing: '0.05em',
+  textTransform: 'uppercase',
 };
 
 function formulaRowStyle(active: boolean): React.CSSProperties {
   return {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    background: active ? 'rgba(127,230,255,0.08)' : 'transparent',
-    border: `1px solid ${active ? 'rgba(127,230,255,0.22)' : 'transparent'}`,
-    borderRadius: 5, cursor: 'pointer', padding: '4px 8px', textAlign: 'left',
+    background: active ? 'rgba(127,230,255,.08)' : 'transparent',
+    border: `1px solid ${active ? 'rgba(127,230,255,.22)' : 'transparent'}`,
+    borderRadius: 6, cursor: 'pointer', padding: '5px 8px', textAlign: 'left',
     width: '100%',
   };
 }
 
 const formulaLabelStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--ink)',
+  fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--text)',
 };
 
 const formulaValueStyle: React.CSSProperties = {
   fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--cyan)',
 };
+
+const targetRow: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  marginTop: 4, paddingTop: 8,
+  borderTop: '1px solid rgba(255,255,255,.06)',
+};
+
+const targetLabelStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)', fontSize: 9, color: 'var(--text-muted)',
+  textTransform: 'uppercase', letterSpacing: '0.06em',
+};
+
+const targetValueStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)', fontWeight: 500,
+};
+
+const footerStyle: React.CSSProperties = {
+  display: 'flex', gap: 10,
+  padding: '14px 22px 18px',
+  borderTop: '1px solid rgba(255,255,255,.07)',
+  flexShrink: 0,
+};
+
+const branchBtnStyle: React.CSSProperties = {
+  flex: 1,
+  background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.12)',
+  borderRadius: 10, color: 'var(--text-2)', cursor: 'pointer',
+  fontFamily: 'var(--font-ui)', fontSize: 13, fontWeight: 600, padding: '10px',
+};
+
+function publishBtnStyle(disabled: boolean): React.CSSProperties {
+  return {
+    flex: 2,
+    background: disabled ? 'rgba(255,255,255,.04)' : 'linear-gradient(90deg, rgba(127,230,255,.18), rgba(255,135,210,.16))',
+    border: disabled ? '1px solid rgba(255,255,255,.08)' : '1px solid rgba(127,230,255,.3)',
+    borderRadius: 10,
+    color: disabled ? 'var(--text-muted)' : 'var(--text)',
+    cursor: disabled ? 'default' : 'pointer',
+    fontFamily: 'var(--font-ui)', fontSize: 13, fontWeight: 600, padding: '10px',
+    opacity: disabled ? 0.5 : 1,
+  };
+}
 
 function statusBadgeStyle(status: string): React.CSSProperties {
   return {
@@ -336,8 +437,8 @@ function statusBadgeStyle(status: string): React.CSSProperties {
     fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700,
     textTransform: 'uppercase', letterSpacing: '0.07em',
     padding: '2px 7px', borderRadius: 20,
-    background: status === 'published' ? 'rgba(127,230,255,0.10)' : 'rgba(146,150,180,0.12)',
-    color: status === 'published' ? 'var(--cyan)' : 'var(--mute)',
-    border: `1px solid ${status === 'published' ? 'rgba(127,230,255,0.22)' : 'rgba(146,150,180,0.18)'}`,
+    background: status === 'published' ? 'rgba(127,230,255,.10)' : 'rgba(146,150,180,.12)',
+    color: status === 'published' ? 'var(--cyan)' : 'var(--text-muted)',
+    border: `1px solid ${status === 'published' ? 'rgba(127,230,255,.22)' : 'rgba(146,150,180,.18)'}`,
   };
 }

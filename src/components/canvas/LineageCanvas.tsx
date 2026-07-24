@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow, Background, Controls, MiniMap,
+  ReactFlow, Background,
   useNodesState, useEdgesState, useReactFlow,
   type NodeMouseHandler, type OnNodeDrag,
 } from '@xyflow/react';
@@ -9,19 +9,19 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useProofStore } from '../../store/useProofStore';
 import SpecNodeComponent from './SpecNode';
+import GradientEdge from '../CustomEdge';
 import IngredientLibrary from '../library/IngredientLibrary';
 import SpecPanel from '../spec/SpecPanel';
 import SettingsPanel from '../spec/SettingsPanel';
 import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
+import ContextMenuFallback from '../radial/ContextMenuFallback';
+import CommonsPanel from './CommonsPanel';
 
-// Defined outside component so the reference never changes between renders.
 const NODE_TYPES = { specNode: SpecNodeComponent };
-
-// Stable empty object shared across all nodes — SpecNode reads from store directly.
-const EMPTY_DATA = {} as Record<string, never>;
+const EDGE_TYPES = { default: GradientEdge };
 
 interface Props {
-  user: any;
+  user: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   onLoginClick: () => void;
   onLogoutClick: () => void;
 }
@@ -31,6 +31,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     specs, specsLoading, selectedSpecId,
     loadSpecs, loadSpecCosts, loadIngredients, loadAllSpecComponents,
     createSpec, editSpec, selectSpec,
+    activeFormulaId,
   } = useProofStore(useShallow(state => ({
     specs: state.specs,
     specsLoading: state.specsLoading,
@@ -42,21 +43,25 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     createSpec: state.createSpec,
     editSpec: state.editSpec,
     selectSpec: state.selectSpec,
+    activeFormulaId: state.activeFormulaId,
   })));
 
   const [showLibrary, setShowLibrary] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
+  const [menuMode, setMenuMode] = useState<'radial' | 'list'>('radial');
+  const [isFirstRun, setIsFirstRun] = useState(() => !localStorage.getItem('proof_menu_onboarded'));
+  const [zoom, setZoom] = useState(100);
   const dragSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const didFitRef = useRef(false);
-  const { fitView } = useReactFlow();
+  // Stable ref for long-press callback — avoids rebuilding node data on every render
+  const longPressRef = useRef<(nodeId: string, pos: { x: number; y: number }) => void>(() => {});
+  const { fitView, zoomIn, zoomOut, getViewport } = useReactFlow();
 
-  // React Flow owns node/edge state — this is the source of truth for positions
-  // and selection so React Flow never fights with external state.
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([]);
 
-  // Load data when user logs in
   useEffect(() => {
     if (!user) return;
     loadSpecs().then(() => loadSpecCosts());
@@ -64,9 +69,6 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     loadAllSpecComponents();
   }, [user?.id]);
 
-  // Sync node list from store.
-  // Preserve React Flow's current position for existing nodes (drag positions are
-  // held in React Flow state, not persisted to the store until the debounce fires).
   useEffect(() => {
     setRfNodes(current => {
       const posMap = new Map(current.map(n => [n.id, n.position]));
@@ -74,12 +76,11 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
         id: spec.id,
         type: 'specNode' as const,
         position: posMap.get(spec.id) ?? { x: spec.canvas_x, y: spec.canvas_y },
-        data: EMPTY_DATA,
+        data: stableNodeData,
       }));
     });
   }, [specs]);
 
-  // Sync edges
   useEffect(() => {
     setRfEdges(
       specs
@@ -88,18 +89,12 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           id: `${s.parent_spec_id}→${s.id}`,
           source: s.parent_spec_id!,
           target: s.id,
-          type: 'smoothstep',
+          type: 'default',
           label: s.change_note || undefined,
-          style: { stroke: '#334155', strokeWidth: 1.5 },
-          labelStyle: { fill: '#64748b', fontSize: 11 },
-          labelBgStyle: { fill: 'rgba(10,15,28,0.85)', fillOpacity: 0.85 },
-          labelBgPadding: [4, 2] as [number, number],
-          labelBgBorderRadius: 4,
         }))
     );
   }, [specs]);
 
-  // Fit view once after initial load (nodes go from empty → populated)
   useEffect(() => {
     if (rfNodes.length > 0 && !didFitRef.current) {
       didFitRef.current = true;
@@ -126,7 +121,6 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [specs, createSpec, selectSpec]);
 
   const handlePanelClose = useCallback(() => {
-    // Clear React Flow selection state
     setRfNodes(nds => nds.map(n => n.selected ? { ...n, selected: false } : n));
     selectSpec(null);
     loadSpecCosts();
@@ -137,46 +131,121 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     if (selectedSpecId) selectSpec(null);
   }, [radialCtx, selectedSpecId, selectSpec]);
 
+  const openMenu = useCallback((ctx: RadialContext) => {
+    setRadialCtx(ctx);
+    setMenuMode(isFirstRun ? 'list' : 'radial');
+  }, [isFirstRun]);
+
+  const handleDismissFirstRun = useCallback(() => {
+    localStorage.setItem('proof_menu_onboarded', '1');
+    setIsFirstRun(false);
+  }, []);
+
+  const handleNodeLongPress = useCallback((nodeId: string, pos: { x: number; y: number }) => {
+    openMenu({ kind: 'node', nodeId, position: pos });
+  }, [openMenu]);
+  // Keep ref in sync so SpecNode always has the latest callback without node data rebuild
+  longPressRef.current = handleNodeLongPress;
+
+  // Stable nodeData object — same reference forever, so React.memo on SpecNode can skip re-renders
+  const stableNodeData = useMemo(() => ({
+    onLongPress: (nodeId: string, pos: { x: number; y: number }) => longPressRef.current(nodeId, pos),
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onPaneContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (!user) return;
-    setRadialCtx({ kind: 'canvas', position: { x: e.clientX, y: e.clientY } });
-  }, [user]);
+    openMenu({ kind: 'canvas', position: { x: e.clientX, y: e.clientY } });
+  }, [user, openMenu]);
 
   const onNodeContextMenu: NodeMouseHandler = useCallback((e, node) => {
     e.preventDefault();
     if (!user) return;
-    setRadialCtx({ kind: 'node', nodeId: node.id, position: { x: e.clientX, y: e.clientY } });
-  }, [user]);
+    openMenu({ kind: 'node', nodeId: node.id, position: { x: e.clientX, y: e.clientY } });
+  }, [user, openMenu]);
+
+  const handleZoomIn = useCallback(() => {
+    zoomIn();
+    setTimeout(() => setZoom(Math.round(getViewport().zoom * 100)), 200);
+  }, [zoomIn, getViewport]);
+
+  const handleZoomOut = useCallback(() => {
+    zoomOut();
+    setTimeout(() => setZoom(Math.round(getViewport().zoom * 100)), 200);
+  }, [zoomOut, getViewport]);
+
+  const handleFit = useCallback(() => {
+    fitView({ padding: 0.15, duration: 400 });
+    setTimeout(() => setZoom(Math.round(getViewport().zoom * 100)), 450);
+  }, [fitView, getViewport]);
+
+  const onMoveEnd = useCallback(() => {
+    setZoom(Math.round(getViewport().zoom * 100));
+  }, [getViewport]);
 
   // ── Render ───────────────────────────────────────────────────
   return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      <header style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 20 }}>🍹</span>
-          <span style={{ fontWeight: 800, fontSize: 15, color: '#e2e8f0', letterSpacing: '-0.01em' }}>Proof</span>
-          {specsLoading && <span style={{ fontSize: 11, color: '#475569' }}>Loading…</span>}
+    <div style={{ width: '100vw', height: '100vh', background: 'var(--ground)', position: 'relative', overflow: 'hidden' }}>
+
+      {/* Light blooms — give glass something to refract */}
+      <div className="bloom bloom-indigo" style={{ left: -60, top: 60, width: 460, height: 460 }} />
+      <div className="bloom bloom-teal" style={{ right: 60, top: -40, width: 420, height: 420 }} />
+      <div className="bloom bloom-plum" style={{ left: '44%', bottom: -120, width: 520, height: 460 }} />
+
+      {/* ── Floating toolbar ─────────────────────────────────── */}
+      <div style={toolbar}>
+        {/* Left: wordmark + toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+          <span className="display" style={wordmark}>Proof</span>
+          {specsLoading && <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--text-muted)' }}>Loading…</span>}
+          <div style={toggle}>
+            <button
+              onClick={() => setCanvasMode('canvas')}
+              style={canvasMode === 'canvas' ? toggleActive : toggleInactive}
+            >
+              Canvas
+            </button>
+            <button
+              onClick={() => setCanvasMode('commons')}
+              style={canvasMode === 'commons' ? toggleActive : toggleInactive}
+            >
+              Commons
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {user ? (
+
+        {/* Right: model selector + actions + avatar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {user && (
             <>
-              <button onClick={() => setShowLibrary(true)} style={hBtn()}>🧪 Library</button>
-              <button onClick={() => setShowSettings(true)} style={hBtn()}>⚙ Settings</button>
-              <button onClick={handleNewSpec} style={hBtn('#10b981')}>+ New Spec</button>
-              <button onClick={onLogoutClick} style={hBtn()}>Sign Out</button>
+              <button onClick={() => setShowSettings(true)} style={modelPill}>
+                <span style={{ fontFamily: 'var(--font-ui)', fontSize: 10, color: 'var(--text-muted)' }}>Model</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>GP% ex-VAT</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>▾</span>
+              </button>
+              <button onClick={() => setShowLibrary(true)} style={toolbarBtn}>Library</button>
+              <button onClick={handleNewSpec} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>+ New Spec</button>
+              <button onClick={onLogoutClick} style={toolbarBtn}>Sign Out</button>
             </>
-          ) : (
-            <button onClick={onLoginClick} style={hBtn('#10b981')}>Sign In</button>
+          )}
+          {!user && (
+            <button onClick={onLoginClick} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>Sign In</button>
+          )}
+          {user && (
+            <div style={avatar}>
+              {user.email?.[0]?.toUpperCase() ?? 'U'}
+            </div>
           )}
         </div>
-      </header>
+      </div>
 
-      <div style={{ flex: 1 }}>
+      {/* ── Canvas ───────────────────────────────────────────── */}
+      <div style={{ position: 'absolute', inset: 0 }}>
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
@@ -184,63 +253,220 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           onPaneClick={onPaneClick}
           onPaneContextMenu={onPaneContextMenu}
           onNodeContextMenu={onNodeContextMenu}
-          minZoom={0.2}
-          maxZoom={2}
+          onMoveEnd={onMoveEnd}
+          minZoom={0.15}
+          maxZoom={2.5}
           onlyRenderVisibleElements
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="#1e293b" gap={24} size={1} />
-          <Controls style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #1e293b', borderRadius: 8 }} />
-          <MiniMap
-            style={{ background: 'rgba(10,15,28,0.9)', border: '1px solid #1e293b' }}
-            nodeColor="#1e293b"
-            maskColor="rgba(0,0,0,0.4)"
-          />
+          <Background color="rgba(255,255,255,.04)" gap={28} size={1} />
         </ReactFlow>
 
+        {/* Empty states */}
         {!specsLoading && specs.length === 0 && user && (
           <div style={emptyState}>
-            <p style={{ color: '#475569', fontSize: 14, marginBottom: 16 }}>No specs yet — start your first riff.</p>
-            <button onClick={handleNewSpec} style={hBtn('#10b981', true)}>+ Create first spec</button>
+            <p style={{ fontFamily: 'var(--font-ui)', color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
+              No specs yet — right-click to start your first riff.
+            </p>
           </div>
         )}
         {!user && (
           <div style={emptyState}>
-            <p style={{ color: '#475569', fontSize: 14, marginBottom: 16 }}>Sign in to build your lineage canvas.</p>
-            <button onClick={onLoginClick} style={hBtn('#10b981', true)}>Sign In</button>
+            <p style={{ fontFamily: 'var(--font-ui)', color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
+              Sign in to build your lineage canvas.
+            </p>
+            <button onClick={onLoginClick} style={{ ...toolbarBtn, padding: '8px 20px', color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>Sign In</button>
           </div>
         )}
       </div>
 
+      {/* ── Zoom dock ────────────────────────────────────────── */}
+      <div style={zoomDock}>
+        <button onClick={handleZoomOut} style={dockBtn}>−</button>
+        <span style={dockZoom}>{zoom}%</span>
+        <button onClick={handleZoomIn} style={dockBtn}>+</button>
+        <div style={dockDivider} />
+        <button onClick={handleFit} style={{ ...dockBtn, padding: '0 10px', width: 'auto', fontFamily: 'var(--font-ui)', fontSize: 11 }}>
+          Fit lineage
+        </button>
+      </div>
+
+      {/* ── Panels & menus ───────────────────────────────────── */}
       {showLibrary && <IngredientLibrary onClose={() => setShowLibrary(false)} />}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {selectedSpecId && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
-      {radialCtx && <RadialMenu context={radialCtx} onClose={() => setRadialCtx(null)} />}
+      {canvasMode === 'commons' && <CommonsPanel onClose={() => setCanvasMode('canvas')} />}
+
+      {radialCtx && menuMode === 'radial' && (
+        <RadialMenu context={radialCtx} onClose={() => setRadialCtx(null)} />
+      )}
+      {radialCtx && menuMode === 'list' && (
+        <ContextMenuFallback
+          context={radialCtx}
+          onClose={() => setRadialCtx(null)}
+          onSwitchToRadial={() => setMenuMode('radial')}
+          firstRun={isFirstRun}
+          onDismissFirstRun={handleDismissFirstRun}
+        />
+      )}
     </div>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const headerStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  padding: '10px 16px', background: 'rgba(10,15,28,0.95)',
-  borderBottom: '1px solid #1e293b', flexShrink: 0, zIndex: 10,
-  backdropFilter: 'blur(12px)',
+const toolbar: React.CSSProperties = {
+  position: 'absolute',
+  top: 20, left: 20, right: 20,
+  height: 52,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '0 18px',
+  borderRadius: 'var(--r-bar)',
+  background: 'linear-gradient(168deg, rgba(255,255,255,.085), rgba(255,255,255,.025))',
+  backdropFilter: 'blur(24px) saturate(135%)',
+  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
+  border: '1px solid rgba(255,255,255,.14)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.2), 0 12px 30px -14px rgba(0,0,0,.7)',
+  zIndex: 60,
+  pointerEvents: 'all',
 };
 
-function hBtn(color = '#475569', large = false): React.CSSProperties {
-  return {
-    background: color === '#10b981' ? 'rgba(16,185,129,0.15)' : 'rgba(30,41,59,0.8)',
-    border: `1px solid ${color === '#10b981' ? 'rgba(16,185,129,0.4)' : '#334155'}`,
-    borderRadius: 6, color: color === '#10b981' ? '#10b981' : '#94a3b8',
-    cursor: 'pointer', fontSize: large ? 14 : 12, fontWeight: 600,
-    padding: large ? '8px 20px' : '5px 12px',
-  };
-}
+const wordmark: React.CSSProperties = {
+  fontSize: 20,
+  fontWeight: 700,
+  letterSpacing: '-0.02em',
+};
+
+const toggle: React.CSSProperties = {
+  display: 'flex',
+  gap: 2,
+  background: 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.08)',
+  borderRadius: 9,
+  padding: 3,
+};
+
+const toggleActive: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  fontWeight: 600,
+  color: '#0c0b14',
+  background: 'rgba(230,235,245,.92)',
+  padding: '5px 12px',
+  borderRadius: 6,
+  border: 'none',
+  cursor: 'pointer',
+};
+
+const toggleInactive: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  fontWeight: 500,
+  color: 'var(--text-muted)',
+  padding: '5px 12px',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+};
+
+const modelPill: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  background: 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.1)',
+  borderRadius: 9,
+  padding: '6px 11px',
+  cursor: 'pointer',
+};
+
+const toolbarBtn: React.CSSProperties = {
+  background: 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.1)',
+  borderRadius: 7,
+  color: 'var(--text-2)',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 12,
+  fontWeight: 500,
+  padding: '5px 12px',
+};
+
+const avatar: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  borderRadius: '50%',
+  background: 'linear-gradient(140deg, #3a3380, #5a2a66)',
+  border: '1px solid rgba(255,255,255,.18)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--text)',
+  flexShrink: 0,
+};
 
 const emptyState: React.CSSProperties = {
-  position: 'absolute', top: '50%', left: '50%',
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
   transform: 'translate(-50%, -50%)',
-  textAlign: 'center', pointerEvents: 'all',
+  textAlign: 'center',
+  pointerEvents: 'all',
+};
+
+const zoomDock: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 22,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: 5,
+  borderRadius: 13,
+  background: 'linear-gradient(168deg, rgba(255,255,255,.08), rgba(255,255,255,.03))',
+  backdropFilter: 'blur(24px) saturate(135%)',
+  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
+  border: '1px solid rgba(255,255,255,.12)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.18), 0 14px 34px -14px rgba(0,0,0,.7)',
+  zIndex: 60,
+  pointerEvents: 'all',
+};
+
+const dockBtn: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 7,
+  color: 'var(--text-2)',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 16,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const dockZoom: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--text-2)',
+  minWidth: 40,
+  textAlign: 'center',
+  userSelect: 'none',
+};
+
+const dockDivider: React.CSSProperties = {
+  width: 1,
+  height: 18,
+  background: 'rgba(255,255,255,.1)',
+  margin: '0 2px',
 };

@@ -1,5 +1,9 @@
 import { supabase } from './client';
 
+// Re-export new query modules for backward compat
+export type { CatalogueIngredient } from './catalogue';
+export type { PublishedSpec, ComponentSnapshot } from './published';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function currentUser() {
@@ -17,8 +21,9 @@ export type Ingredient = {
   type: string | null;
   abv: number;
   pack_size_ml: number;
-  pack_cost: number;
-  cost_per_ml: number;
+  pack_cost: number | null;   // null = unpriced (pricing is optional)
+  cost_per_ml: number | null; // generated; null while unpriced
+  catalogue_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -28,7 +33,7 @@ export type IngredientInput = {
   type: string | null;
   abv: number;
   pack_size_ml: number;
-  pack_cost: number;
+  pack_cost?: number | null;  // optional — omit / null to leave unpriced
 };
 
 export async function listIngredients(): Promise<Ingredient[]> {
@@ -72,6 +77,7 @@ export type Spec = {
   user_id: string;
   name: string;
   parent_spec_id: string | null;
+  forked_from_published_id: string | null;
   change_note: string | null;
   method: string | null;
   glass: string | null;
@@ -89,12 +95,15 @@ export type Spec = {
 export type SpecInput = {
   name: string;
   parent_spec_id?: string | null;
+  forked_from_published_id?: string | null;
   change_note?: string | null;
   method?: string | null;
   glass?: string | null;
   garnish?: string | null;
   build_text?: string | null;
   sale_price?: number | null;
+  status?: 'draft' | 'published';
+  visibility?: 'private' | 'published';
   canvas_x?: number;
   canvas_y?: number;
 };

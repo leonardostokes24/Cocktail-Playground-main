@@ -3,7 +3,8 @@ import type { Ingredient, IngredientInput } from '../../lib/supabase/queries';
 
 const TYPES = ['spirit', 'liqueur', 'vermouth', 'amaro', 'juice', 'syrup', 'bitters', 'mixer', 'other'];
 
-const BLANK: IngredientInput = { name: '', type: null, abv: 0, pack_size_ml: 700, pack_cost: 0 };
+// Pricing is optional — a new ingredient starts unpriced.
+const BLANK: IngredientInput = { name: '', type: null, abv: 0, pack_size_ml: 700, pack_cost: null };
 
 interface Props {
   initial?: Ingredient;
@@ -22,7 +23,9 @@ export default function IngredientForm({ initial, onSave, onCancel }: Props) {
 
   const set = (patch: Partial<IngredientInput>) => setForm((f) => ({ ...f, ...patch }));
 
-  const costPerMl = form.pack_size_ml > 0 ? (form.pack_cost / form.pack_size_ml) : 0;
+  const costPerMl = form.pack_cost != null && form.pack_size_ml > 0
+    ? form.pack_cost / form.pack_size_ml
+    : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,14 +73,18 @@ export default function IngredientForm({ initial, onSave, onCancel }: Props) {
             value={form.pack_size_ml} onChange={(e) => set({ pack_size_ml: parseFloat(e.target.value) || 0 })} />
         </div>
         <div style={{ flex: 1 }}>
-          <label style={styles.label}>Pack cost (£)</label>
-          <input style={styles.input} type="number" min={0} step={0.01}
-            value={form.pack_cost} onChange={(e) => set({ pack_cost: parseFloat(e.target.value) || 0 })} />
+          <label style={styles.label}>Pack cost (£) · optional</label>
+          <input style={styles.input} type="number" min={0} step={0.01} placeholder="unpriced"
+            value={form.pack_cost ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              set({ pack_cost: v === '' ? null : (Number.isNaN(parseFloat(v)) ? null : parseFloat(v)) });
+            }} />
         </div>
         <div style={{ flex: 1 }}>
           <label style={styles.label}>Cost / ml</label>
           <input style={{ ...styles.input, color: '#94a3b8', cursor: 'not-allowed' }}
-            readOnly value={`£${costPerMl.toFixed(4)}`} />
+            readOnly value={costPerMl != null ? `£${costPerMl.toFixed(4)}` : '—'} />
         </div>
       </div>
 

@@ -83,9 +83,15 @@ export default function IngredientLibrary({ onClose }: Props) {
                     <td style={{ ...td, color: '#64748b' }}>{ing.type ?? '—'}</td>
                     <td style={{ ...td, textAlign: 'right' }}>{ing.abv}</td>
                     <td style={{ ...td, textAlign: 'right' }}>{ing.pack_size_ml}</td>
-                    <td style={{ ...td, textAlign: 'right' }}>£{Number(ing.pack_cost).toFixed(2)}</td>
+                    <td style={{ ...td, textAlign: 'right' }}>
+                      {ing.pack_cost == null ? (
+                        <button onClick={() => setMode({ kind: 'editing', ingredient: ing })} style={addPriceBtn}>
+                          + Add price
+                        </button>
+                      ) : `£${Number(ing.pack_cost).toFixed(2)}`}
+                    </td>
                     <td style={{ ...td, textAlign: 'right', color: '#10b981' }}>
-                      £{Number(ing.cost_per_ml).toFixed(4)}
+                      {ing.cost_per_ml == null ? <span style={{ color: '#475569' }}>—</span> : `£${Number(ing.cost_per_ml).toFixed(4)}`}
                     </td>
                     <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button
@@ -151,4 +157,9 @@ const btnClose: React.CSSProperties = {
 
 const btnIcon: React.CSSProperties = {
   background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, padding: '2px 4px',
+};
+
+const addPriceBtn: React.CSSProperties = {
+  background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 5,
+  color: '#34d399', cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: '3px 8px',
 };

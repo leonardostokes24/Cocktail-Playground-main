@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { toMl, UNITS } from '../../utils/units';
-import type { Ingredient } from '../../store/useProofStore';
+import type { Ingredient, CatalogueIngredient } from '../../store/useProofStore';
 
 interface Props {
   ingredients: Ingredient[];
+  catalogueIngredients: CatalogueIngredient[];
+  // Materialize the user's own (unpriced) ingredient row for a catalogue entry.
+  onResolveCatalogue: (catalogueId: string) => Promise<Ingredient>;
   nextPosition: number;
   specId: string;
   onAdd: (payload: {
@@ -13,23 +16,39 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function AddComponentForm({ ingredients, nextPosition, specId, onAdd, onCancel }: Props) {
-  const [ingredientId, setIngredientId] = useState('');
+export default function AddComponentForm({
+  ingredients, catalogueIngredients, onResolveCatalogue, nextPosition, specId, onAdd, onCancel,
+}: Props) {
+  // Value is prefixed: 'own:<ingredientId>' | 'cat:<catalogueId>'.
+  const [selection, setSelection] = useState('');
   const [amount, setAmount] = useState('');
   const [unit, setUnit] = useState('ml');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selected = ingredients.find((i) => i.id === ingredientId);
+  // Catalogue entries the user hasn't already added — the rest live under "Your ingredients".
+  const ownedCatalogueIds = useMemo(
+    () => new Set(ingredients.map((i) => i.catalogue_id).filter(Boolean) as string[]),
+    [ingredients]
+  );
+  const availableCatalogue = useMemo(
+    () => catalogueIngredients.filter((c) => !ownedCatalogueIds.has(c.id)),
+    [catalogueIngredients, ownedCatalogueIds]
+  );
+
   const amountNum = parseFloat(amount);
-  const previewMl = selected && amountNum > 0 ? toMl(amountNum, unit) : null;
+  const previewMl = selection && amountNum > 0 ? toMl(amountNum, unit) : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ingredientId) { setError('Select an ingredient'); return; }
+    if (!selection) { setError('Select an ingredient'); return; }
     if (!amountNum || amountNum <= 0) { setError('Enter a valid amount'); return; }
     setSaving(true);
     try {
+      // A catalogue pick is materialized into the user's library (unpriced) first.
+      const ingredientId = selection.startsWith('cat:')
+        ? (await onResolveCatalogue(selection.slice(4))).id
+        : selection.slice(4);
       await onAdd({
         spec_id: specId,
         ingredient_id: ingredientId,
@@ -46,11 +65,24 @@ export default function AddComponentForm({ ingredients, nextPosition, specId, on
 
   return (
     <form onSubmit={handleSubmit} style={formStyle}>
-      <select style={inp} value={ingredientId} onChange={(e) => setIngredientId(e.target.value)} autoFocus>
+      <select style={inp} value={selection} onChange={(e) => setSelection(e.target.value)} autoFocus>
         <option value="">— select ingredient —</option>
-        {ingredients.map((i) => (
-          <option key={i.id} value={i.id}>{i.name}{i.type ? ` (${i.type})` : ''}</option>
-        ))}
+        {ingredients.length > 0 && (
+          <optgroup label="Your ingredients">
+            {ingredients.map((i) => (
+              <option key={i.id} value={`own:${i.id}`}>
+                {i.name}{i.type ? ` (${i.type})` : ''}{i.pack_cost == null ? ' · unpriced' : ''}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {availableCatalogue.length > 0 && (
+          <optgroup label="Catalogue">
+            {availableCatalogue.map((c) => (
+              <option key={c.id} value={`cat:${c.id}`}>{c.name} ({c.type})</option>
+            ))}
+          </optgroup>
+        )}
       </select>
 
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

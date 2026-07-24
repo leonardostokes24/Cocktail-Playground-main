@@ -15,7 +15,8 @@ export default function ComponentRow({ component, onUpdate, onRemove }: Props) {
   const [hovered, setHovered] = useState(false);
 
   const ing = component.ingredients;
-  const rowCost = component.amount_ml * Number(ing?.cost_per_ml ?? 0);
+  // Unpriced ingredient (cost_per_ml null) → no line cost; pricing is optional.
+  const rowCost = ing?.cost_per_ml == null ? null : component.amount_ml * Number(ing.cost_per_ml);
 
   const handleSave = () => {
     const num = parseFloat(amount);
@@ -35,16 +36,12 @@ export default function ComponentRow({ component, onUpdate, onRemove }: Props) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Name + type */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      {/* Type dot + name */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 7 }}>
+        {ing?.type && <span style={typeDot(ing.type)} />}
+        <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {ing?.name ?? '—'}
         </span>
-        {ing?.type && (
-          <span style={{ fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
-            {ing.type}
-          </span>
-        )}
       </div>
 
       {/* Amount (editable) */}
@@ -68,16 +65,16 @@ export default function ComponentRow({ component, onUpdate, onRemove }: Props) {
         </span>
       ) : (
         <button onClick={() => setEditing(true)} style={amtBtn} title="Click to edit">
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--mute)' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)' }}>
             {component.original_amount ?? component.amount_ml}&thinsp;{component.original_unit ?? 'ml'}
           </span>
         </button>
       )}
 
-      {/* Cost */}
+      {/* Cost (only when priced — pricing is optional) */}
       {!editing && (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--mute)', whiteSpace: 'nowrap', minWidth: 48, textAlign: 'right' }}>
-          £{rowCost.toFixed(3)}
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', minWidth: 48, textAlign: 'right' }}>
+          {rowCost == null ? '—' : `£${rowCost.toFixed(3)}`}
         </span>
       )}
 
@@ -87,10 +84,25 @@ export default function ComponentRow({ component, onUpdate, onRemove }: Props) {
   );
 }
 
+const TYPE_COLORS: Record<string, string> = {
+  spirit:    'var(--type-spirit)',
+  modifier:  'var(--type-modifier)',
+  citrus:    'var(--type-citrus)',
+  sweetener: 'var(--type-sweetener)',
+  bitters:   'var(--type-bitters)',
+};
+
+function typeDot(type: string): React.CSSProperties {
+  return {
+    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+    background: TYPE_COLORS[type] ?? 'rgba(255,255,255,.3)',
+  };
+}
+
 const miniInp: React.CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   border: '1px solid var(--glass-border)',
-  borderRadius: 5, color: 'var(--ink)',
+  borderRadius: 5, color: 'var(--text)',
   fontFamily: 'var(--font-mono)', fontSize: 12, padding: '3px 6px',
   outline: 'none', width: 56,
 };
@@ -108,12 +120,12 @@ const confirmBtn: React.CSSProperties = {
 
 const cancelBtn: React.CSSProperties = {
   background: 'rgba(255,255,255,0.04)', border: '1px solid var(--glass-border)',
-  borderRadius: 5, color: 'var(--mute)', cursor: 'pointer',
+  borderRadius: 5, color: 'var(--text-muted)', cursor: 'pointer',
   fontFamily: 'var(--font-ui)', fontSize: 11, padding: '2px 6px',
 };
 
 const delBtn: React.CSSProperties = {
-  background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer',
+  background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer',
   fontFamily: 'var(--font-ui)', fontSize: 11, padding: '2px 4px', flexShrink: 0,
   opacity: 0.6,
 };

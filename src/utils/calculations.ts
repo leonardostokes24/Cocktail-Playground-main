@@ -75,15 +75,25 @@ export type SpecCosts = {
   finalVolumeMl: number;
   finalAbvPct: number;
   gpPct: number | null;
+  /** Components with a liquid amount but no price yet. Pricing is optional. */
+  unpricedCount: number;
+  /** True only when the spec has components and every one is priced. */
+  fullyPriced: boolean;
 };
+
+// A null/blank cost_per_ml means "unpriced" (pricing is optional) — distinct from
+// a legitimate 0 (e.g. water priced at zero). Only the former blocks a trustworthy GP.
+function isUnpriced(cpm: number | string | null | undefined): boolean {
+  return cpm == null || cpm === '';
+}
 
 export function computeSpecCosts(
   method: string | null,
   salePrice: number | string | null,
   components: Array<{
     amount_ml: number;
-    ingredients?: { cost_per_ml: number | string; abv: number } | null;
-    preps?: { cost_per_ml: number | string; abv: number } | null;
+    ingredients?: { cost_per_ml: number | string | null; abv: number } | null;
+    preps?: { cost_per_ml: number | string | null; abv: number } | null;
   }>,
   dilutionOverrides: Record<string, number> = {},
   modifiers: CostModifiers = { sundriesPerServe: 0, wasteRate: 0 }
@@ -91,9 +101,11 @@ export function computeSpecCosts(
   let pourCost = new Decimal(0);
   let liquidMl = 0;
   let weightedAbv = 0;
+  let unpricedCount = 0;
 
   for (const c of components) {
     const ref = c.ingredients ?? c.preps;
+    if (isUnpriced(ref?.cost_per_ml)) unpricedCount++;
     const cpm = toMoney(ref?.cost_per_ml);
     const abv = Number(ref?.abv ?? 0);
     pourCost = pourCost.plus(cpm.times(c.amount_ml));
@@ -107,7 +119,13 @@ export function computeSpecCosts(
   const m = method ?? 'built';
   const finalVolumeMl = finalVolume(liquidMl, m, dilutionOverrides);
   const finalAbvPct = finalAbv(preDilutionAbv, liquidMl, m, dilutionOverrides);
-  const gpPct = salePrice != null && Number(salePrice) > 0 ? gp(modifiedCost.toNumber(), salePrice) : null;
+
+  // GP is only meaningful once every component is priced — otherwise the cost is
+  // understated and would show a misleadingly high margin.
+  const fullyPriced = components.length > 0 && unpricedCount === 0;
+  const gpPct = fullyPriced && salePrice != null && Number(salePrice) > 0
+    ? gp(modifiedCost.toNumber(), salePrice)
+    : null;
 
   return {
     pourCost: pourCost.toNumber(),
@@ -117,5 +135,7 @@ export function computeSpecCosts(
     finalVolumeMl,
     finalAbvPct,
     gpPct,
+    unpricedCount,
+    fullyPriced,
   };
 }
