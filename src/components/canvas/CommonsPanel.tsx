@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useProofStore, type PublishedSpec } from '../../store/useProofStore';
+import { useProofStore, type PublishedSpec, type LineageRow } from '../../store/useProofStore';
+
+// Seeded system account that owns the IBA classics.
+const IBA_USER_ID = '00000000-0000-4000-a000-000000000001';
 
 interface Props {
   onClose: () => void;
@@ -10,6 +13,7 @@ export default function CommonsPanel({ onClose }: Props) {
   const {
     publishedFeed, publishedFeedLoading, publishedFeedLoaded,
     loadPublishedFeed, searchPublishedFeed, forkPublished, preloadPublished,
+    lineageByPublishedId, lineageLoadingId, loadLineage,
   } = useProofStore(useShallow(s => ({
     publishedFeed: s.publishedFeed,
     publishedFeedLoading: s.publishedFeedLoading,
@@ -18,11 +22,25 @@ export default function CommonsPanel({ onClose }: Props) {
     searchPublishedFeed: s.searchPublishedFeed,
     forkPublished: s.forkPublished,
     preloadPublished: s.preloadPublished,
+    lineageByPublishedId: s.lineageByPublishedId,
+    lineageLoadingId: s.lineageLoadingId,
+    loadLineage: s.loadLineage,
   })));
 
   const [query, setQuery] = useState('');
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [preloading, setPreloading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Lineage is fetched on demand and cached in the store; the RPC is the only
+  // sanctioned way to read it (⚑ RLS truncates a plain cross-user read).
+  const handleToggleLineage = useCallback((id: string) => {
+    setExpandedId(prev => {
+      if (prev === id) return null;
+      loadLineage(id);
+      return id;
+    });
+  }, [loadLineage]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const BATCH_CAP = 8;
@@ -101,6 +119,10 @@ export default function CommonsPanel({ onClose }: Props) {
             spec={spec}
             forking={forkingId === spec.id}
             onFork={handleFork}
+            expanded={expandedId === spec.id}
+            onToggleLineage={handleToggleLineage}
+            lineage={lineageByPublishedId[spec.id]}
+            lineageLoading={lineageLoadingId === spec.id}
           />
         ))}
       </div>
@@ -126,13 +148,17 @@ interface CardProps {
   spec: PublishedSpec;
   forking: boolean;
   onFork: (spec: PublishedSpec) => void;
+  expanded: boolean;
+  onToggleLineage: (id: string) => void;
+  lineage?: LineageRow[];
+  lineageLoading: boolean;
 }
 
-function SpecCard({ spec, forking, onFork }: CardProps) {
+function SpecCard({ spec, forking, onFork, expanded, onToggleLineage, lineage, lineageLoading }: CardProps) {
   const [hovered, setHovered] = useState(false);
   const componentCount = Array.isArray(spec.components_snapshot) ? spec.components_snapshot.length : 0;
   const creator = spec.creator_name ?? spec.creator_id?.slice(0, 8) ?? 'unknown';
-  const isIBA = spec.creator_id === '00000000-0000-4000-a000-000000000001';
+  const isIBA = spec.creator_id === IBA_USER_ID;
 
   return (
     <div
@@ -144,6 +170,7 @@ function SpecCard({ spec, forking, onFork }: CardProps) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      <div style={cardRow}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <span style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em' }}>
@@ -178,17 +205,151 @@ function SpecCard({ spec, forking, onFork }: CardProps) {
         </div>
       </div>
       <button
+        onClick={() => onToggleLineage(spec.id)}
+        style={lineageBtn(expanded)}
+        aria-expanded={expanded}
+      >
+        Lineage
+      </button>
+      <button
         disabled={forking}
         onClick={() => onFork(spec)}
         style={forkBtn(forking)}
       >
         {forking ? '…' : 'Fork'}
       </button>
+      </div>
+
+      {expanded && (
+        <div style={lineageWrap}>
+          {lineageLoading && (
+            <span style={lineageMeta}>Tracing lineage…</span>
+          )}
+          {!lineageLoading && lineage && <LineageTrail rows={lineage} focusId={spec.id} />}
+        </div>
+      )}
     </div>
   );
 }
 
+// ── Lineage trail ─────────────────────────────────────────────────────────────
+// Indentation encodes generational distance: each step right is one fork removed
+// from the root. Ancestors sit above the drink in focus, descendants below.
+
+function LineageTrail({ rows, focusId }: { rows: LineageRow[]; focusId: string }) {
+  if (!rows.length) return <span style={lineageMeta}>Lineage unavailable.</span>;
+
+  const ordered = [...rows].sort((a, b) => a.depth - b.depth);
+  const minDepth = ordered[0].depth;
+  const ancestors = ordered.filter(r => r.depth < 0).length;
+  const descendants = ordered.filter(r => r.depth > 0).length;
+
+  return (
+    <>
+      <div style={lineageMeta}>
+        {ancestors === 0 && descendants === 0 && 'Original · no forks yet — fork it to start one'}
+        {ancestors === 0 && descendants > 0 && `Original · ${descendants} fork${descendants !== 1 ? 's' : ''}`}
+        {ancestors > 0 && `${ancestors} generation${ancestors !== 1 ? 's' : ''} back to the original`}
+        {ancestors > 0 && descendants > 0 && ` · ${descendants} fork${descendants !== 1 ? 's' : ''}`}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 8 }}>
+        {ordered.map(row => {
+          const isFocus = row.id === focusId;
+          return (
+            <div key={row.id} style={{ ...lineageRow, paddingLeft: (row.depth - minDepth) * 14 }}>
+              <span style={isFocus ? lineageDotFocus : lineageDot} />
+              <span style={isFocus ? lineageNameFocus : lineageName}>{row.name}</span>
+              <span style={lineageCreator}>
+                {row.creator_id === IBA_USER_ID ? 'IBA Official' : row.creator_id.slice(0, 8)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────────
+
+const cardRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  width: '100%',
+};
+
+const lineageWrap: React.CSSProperties = {
+  marginTop: 10,
+  paddingTop: 10,
+  borderTop: '1px solid rgba(255,255,255,.08)',
+};
+
+const lineageMeta: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 10.5,
+  color: 'var(--text-muted)',
+};
+
+const lineageRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '3px 0',
+  minWidth: 0,
+};
+
+const lineageDot: React.CSSProperties = {
+  width: 5,
+  height: 5,
+  borderRadius: '50%',
+  background: 'rgba(255,255,255,.25)',
+  flexShrink: 0,
+};
+
+const lineageDotFocus: React.CSSProperties = {
+  ...lineageDot,
+  background: 'var(--cyan)',
+  boxShadow: '0 0 0 3px rgba(127,230,255,.15)',
+};
+
+const lineageName: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11.5,
+  color: 'var(--text-2)',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const lineageNameFocus: React.CSSProperties = {
+  ...lineageName,
+  color: 'var(--text)',
+  fontWeight: 600,
+};
+
+const lineageCreator: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 10,
+  color: 'var(--text-muted)',
+  marginLeft: 'auto',
+  paddingLeft: 10,
+  flexShrink: 0,
+};
+
+const lineageBtn = (active: boolean): React.CSSProperties => ({
+  background: active ? 'rgba(255,255,255,.09)' : 'transparent',
+  border: '1px solid rgba(255,255,255,.14)',
+  borderRadius: 7,
+  color: active ? 'var(--text)' : 'var(--text-muted)',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  fontWeight: 500,
+  padding: '6px 11px',
+  flexShrink: 0,
+});
 
 const panel: React.CSSProperties = {
   position: 'absolute',
@@ -281,9 +442,9 @@ const emptyState: React.CSSProperties = {
 };
 
 const card: React.CSSProperties = {
+  // Column: the summary row, plus the lineage trail when expanded.
   display: 'flex',
-  alignItems: 'center',
-  gap: 12,
+  flexDirection: 'column',
   padding: '10px 12px',
   borderRadius: 9,
   background: 'rgba(255,255,255,.035)',

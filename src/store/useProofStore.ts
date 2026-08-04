@@ -19,7 +19,8 @@ import {
 } from '../lib/supabase/catalogue';
 import {
   listPublishedFeed, searchPublished, insertPublishedSpec, forkPublishedSpec,
-  type PublishedSpec, type ComponentSnapshot,
+  getSpecLineage,
+  type PublishedSpec, type ComponentSnapshot, type LineageRow,
 } from '../lib/supabase/published';
 
 function groupBySpecId(components: SpecComponent[]): Record<string, SpecComponent[]> {
@@ -123,6 +124,11 @@ interface ProofState {
   // ── Publish + fork ────────────────────────────────────────────
   publishSpec: (specId: string) => Promise<void>;
   forkPublished: (publishedId: string) => Promise<Spec>;
+
+  // ── Lineage (always via the get_spec_lineage RPC ⚑) ───────────
+  lineageByPublishedId: Record<string, LineageRow[]>;
+  lineageLoadingId: string | null;
+  loadLineage: (publishedId: string) => Promise<void>;
   // Fork several published specs onto the canvas at once, laid out on a grid.
   preloadPublished: (publishedIds: string[]) => Promise<void>;
 
@@ -533,6 +539,21 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
     get().selectSpec(newSpecId);
     return newSpec;
   },
+  lineageByPublishedId: {},
+  lineageLoadingId: null,
+  loadLineage: async (publishedId) => {
+    if (get().lineageByPublishedId[publishedId]) return; // cached
+    set({ lineageLoadingId: publishedId });
+    try {
+      const rows = await getSpecLineage(publishedId);
+      set((s) => ({
+        lineageByPublishedId: { ...s.lineageByPublishedId, [publishedId]: rows },
+        lineageLoadingId: null,
+      }));
+    } catch {
+      set({ lineageLoadingId: null });
+    }
+  },
   preloadPublished: async (publishedIds) => {
     // Lay forked specs out on a grid to the right of any existing specs.
     const baseX = get().specs.length ? Math.max(...get().specs.map((s) => s.canvas_x)) + 320 : 100;
@@ -562,5 +583,5 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
 ));
 
 export type { Ingredient, IngredientInput, Spec, SpecInput, SpecComponent, SpecComponentInput, SpecCostRow };
-export type { CatalogueIngredient, PublishedSpec, ComponentSnapshot };
+export type { CatalogueIngredient, PublishedSpec, ComponentSnapshot, LineageRow };
 export { DILUTION_DEFAULTS };

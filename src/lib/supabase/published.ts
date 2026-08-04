@@ -35,6 +35,27 @@ export type PublishedSpec = {
   lineage_depth: number;
 };
 
+// One row of a published spec's family tree, from get_spec_lineage() (0003).
+export type LineageRow = {
+  id: string;
+  name: string;
+  creator_id: string;
+  venue_id: string | null;
+  forked_from_id: string | null;
+  published_at: string;
+  relationship: 'self' | 'ancestor' | 'descendant';
+  depth: number; // 0 = self, negative = ancestors, positive = descendants
+};
+
+// Cross-user lineage MUST come from this SECURITY DEFINER RPC (⚑). A plain read
+// of published_specs is truncated by RLS to rows the caller can see, which
+// silently breaks ancestry across creators — never walk the tree client-side.
+export async function getSpecLineage(publishedId: string): Promise<LineageRow[]> {
+  const { data, error } = await supabase.rpc('get_spec_lineage', { p_published_id: publishedId });
+  if (error) throw error;
+  return (data ?? []) as LineageRow[];
+}
+
 export async function listPublishedFeed(
   limit = 50,
   offset = 0
