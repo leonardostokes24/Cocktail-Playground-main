@@ -5,6 +5,8 @@ coding reference. Research-validated rules are marked ⚑ — they exist because
 or industry data say so, not preference. Do not relax them.
 
 ---
+## Commit to Github
+Commit to Github every major chnage 
 
 ## One-line orientation
 Private React Flow lineage canvas → ex-VAT GP costing → publish immutable snapshots to a CC-BY

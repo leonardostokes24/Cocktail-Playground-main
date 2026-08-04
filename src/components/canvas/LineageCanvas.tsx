@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow, Background,
+  ReactFlow, Background, SelectionMode,
   useNodesState, useEdgesState, useReactFlow,
   type NodeMouseHandler, type OnNodeDrag,
+  type OnConnect, type OnConnectStart, type OnConnectEnd,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useShallow } from 'zustand/react/shallow';
@@ -30,7 +31,8 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const {
     specs, specsLoading, selectedSpecId,
     loadSpecs, loadSpecCosts, loadIngredients, loadAllSpecComponents,
-    createSpec, editSpec, selectSpec,
+    createSpec, editSpec, selectSpec, branchSpec, attachBranch,
+    removeSpecs, duplicateSpecs, tidySpecs, publishSpecs,
     activeFormulaId,
   } = useProofStore(useShallow(state => ({
     specs: state.specs,
@@ -43,6 +45,12 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     createSpec: state.createSpec,
     editSpec: state.editSpec,
     selectSpec: state.selectSpec,
+    branchSpec: state.branchSpec,
+    attachBranch: state.attachBranch,
+    removeSpecs: state.removeSpecs,
+    duplicateSpecs: state.duplicateSpecs,
+    tidySpecs: state.tidySpecs,
+    publishSpecs: state.publishSpecs,
     activeFormulaId: state.activeFormulaId,
   })));
 
@@ -53,11 +61,18 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const [menuMode, setMenuMode] = useState<'radial' | 'list'>('radial');
   const [isFirstRun, setIsFirstRun] = useState(() => !localStorage.getItem('proof_menu_onboarded'));
   const [zoom, setZoom] = useState(100);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  // Marquee mode: drag the pane to draw a selection box instead of panning.
+  const [boxSelect, setBoxSelect] = useState(false);
   const dragSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const didFitRef = useRef(false);
   // Stable ref for long-press callback — avoids rebuilding node data on every render
   const longPressRef = useRef<(nodeId: string, pos: { x: number; y: number }) => void>(() => {});
-  const { fitView, zoomIn, zoomOut, getViewport } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, getViewport, screenToFlowPosition } = useReactFlow();
+  // Source node of an in-progress handle drag (for drag-to-empty → twist).
+  const connectingFrom = useRef<string | null>(null);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([]);
@@ -71,13 +86,21 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
   useEffect(() => {
     setRfNodes(current => {
-      const posMap = new Map(current.map(n => [n.id, n.position]));
-      return specs.map(spec => ({
-        id: spec.id,
-        type: 'specNode' as const,
-        position: posMap.get(spec.id) ?? { x: spec.canvas_x, y: spec.canvas_y },
-        data: stableNodeData,
-      }));
+      // Carry live canvas state across the rebuild. Position AND selection live in
+      // React Flow, not the store — dropping `selected` here silently cleared the
+      // selection on every specs change (e.g. the debounced drag-position save),
+      // which made the bulk actions look broken.
+      const liveById = new Map(current.map(n => [n.id, n]));
+      return specs.map(spec => {
+        const live = liveById.get(spec.id);
+        return {
+          id: spec.id,
+          type: 'specNode' as const,
+          position: live?.position ?? { x: spec.canvas_x, y: spec.canvas_y },
+          selected: live?.selected ?? false,
+          data: stableNodeData,
+        };
+      });
     });
   }, [specs]);
 
@@ -103,7 +126,9 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [rfNodes.length]);
 
   // ── Handlers ─────────────────────────────────────────────────
-  const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
+  const onNodeClick: NodeMouseHandler = useCallback((evt, node) => {
+    // Multi-select (⌘/Ctrl or Shift) builds a selection — don't open the panel over it.
+    if (evt.metaKey || evt.ctrlKey || evt.shiftKey) return;
     selectSpec(node.id);
   }, [selectSpec]);
 
@@ -113,6 +138,80 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       editSpec(node.id, { canvas_x: node.position.x, canvas_y: node.position.y });
     }, 300);
   }, [editSpec]);
+
+  // ── Lineage gestures ─────────────────────────────────────────
+  const onConnectStart: OnConnectStart = useCallback((_evt, params) => {
+    connectingFrom.current = params.nodeId ?? null;
+  }, []);
+
+  // Drag a node's handle onto another node → attach it as a branch (cycle-guarded).
+  const onConnect: OnConnect = useCallback((conn) => {
+    if (conn.source && conn.target && conn.source !== conn.target) {
+      attachBranch(conn.target, conn.source);
+    }
+  }, [attachBranch]);
+
+  // Drag a node's handle onto empty canvas → spawn a twist (branch child) there.
+  const onConnectEnd: OnConnectEnd = useCallback((event) => {
+    const source = connectingFrom.current;
+    connectingFrom.current = null;
+    if (!source || !user) return;
+    const target = event.target as Element | null;
+    if (!target?.classList?.contains('react-flow__pane')) return; // dropped on a node → onConnect handled it
+    const point = 'changedTouches' in event ? event.changedTouches[0] : (event as MouseEvent);
+    const pos = screenToFlowPosition({ x: point.clientX, y: point.clientY });
+    // Centre the 232px-wide node under the cursor. Height is content-driven now
+    // (recipe rows), so only nudge y by the header — don't assume a fixed height.
+    branchSpec(source, { x: pos.x - 116, y: pos.y - 28 });
+  }, [screenToFlowPosition, branchSpec, user]);
+
+  // ── Selection & bulk actions ─────────────────────────────────
+  // React Flow owns selection state; derive the ids rather than duplicating it.
+  const selectedIds = useMemo(() => rfNodes.filter(n => n.selected).map(n => n.id), [rfNodes]);
+  const selectedCount = selectedIds.length;
+  const hasSelection = selectedCount > 0;
+  const actionsDisabled = !hasSelection || bulkBusy;
+
+  // Widths mirror each panel's own style; the widest open one reserves space so
+  // the dock never sits underneath it.
+  const openPanelWidth = Math.max(
+    selectedSpecId ? 560 : 0,          // SpecPanel
+    showLibrary ? 680 : 0,             // IngredientLibrary
+    showSettings ? 420 : 0,            // SettingsPanel
+    canvasMode === 'commons' ? 500 : 0 // CommonsPanel (480 + 20 right margin)
+  );
+
+  // A changed selection invalidates a pending delete confirmation.
+  useEffect(() => { setConfirmingDelete(false); }, [selectedCount]);
+
+  const clearSelection = useCallback(() => {
+    setRfNodes(nds => nds.map(n => (n.selected ? { ...n, selected: false } : n)));
+    selectSpec(null);
+  }, [setRfNodes, selectSpec]);
+
+  // Every bulk action ends with the selection cleared, so the dock returns to rest.
+  const runBulk = useCallback(async (fn: (ids: string[]) => Promise<void>) => {
+    if (!selectedIds.length || bulkBusy) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    try {
+      await fn(selectedIds);
+      clearSelection();
+    } catch (err) {
+      // Surface it in the dock — a silent failure here reads as "delete is broken".
+      // Supabase rejects with a PostgrestError object, not an Error instance, so
+      // check for a message property too or the real reason is lost.
+      const message =
+        err instanceof Error ? err.message
+        : typeof err === 'object' && err !== null && typeof (err as { message?: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Action failed';
+      setBulkError(message);
+    } finally {
+      setBulkBusy(false);
+      setConfirmingDelete(false);
+    }
+  }, [selectedIds, bulkBusy, clearSelection]);
 
   const handleNewSpec = useCallback(async () => {
     const x = specs.length ? Math.max(...specs.map(s => s.canvas_x)) + 280 : 100;
@@ -240,7 +339,8 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       </div>
 
       {/* ── Canvas ───────────────────────────────────────────── */}
-      <div style={{ position: 'absolute', inset: 0 }}>
+      {/* Below ~55% zoom the recipe rows are unreadable — CSS hides them (see index.css). */}
+      <div style={{ position: 'absolute', inset: 0 }} data-zoom={zoom < 55 ? 'far' : 'near'}>
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
@@ -248,6 +348,9 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           edgeTypes={EDGE_TYPES}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
           onNodeClick={onNodeClick}
           onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
@@ -257,6 +360,16 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           minZoom={0.15}
           maxZoom={2.5}
           onlyRenderVisibleElements
+          // Select mode: drag the pane to marquee-select. Middle mouse still pans
+          // (button 2 is left alone so right-click keeps opening the radial menu).
+          selectionOnDrag={boxSelect}
+          panOnDrag={boxSelect ? [1] : true}
+          // Partial: touching a node selects it — full containment is too fussy
+          // now that nodes are tall recipe cards.
+          selectionMode={SelectionMode.Partial}
+          // Backspace would remove nodes from canvas state only, leaving the DB rows
+          // to reappear on reload. Deletion goes through the dock (store-backed).
+          deleteKeyCode={null}
           proOptions={{ hideAttribution: true }}
         >
           <Background color="rgba(255,255,255,.04)" gap={28} size={1} />
@@ -280,15 +393,84 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
         )}
       </div>
 
-      {/* ── Zoom dock ────────────────────────────────────────── */}
+      {/* ── Dock: zoom + selection actions ───────────────────── */}
+      {/* Keep the dock clear of whichever side panel is open (widths match each
+          panel's own style) so its buttons stay clickable. */}
+      <div style={{ ...dockRail, right: 12 + openPanelWidth }}>
       <div style={zoomDock}>
-        <button onClick={handleZoomOut} style={dockBtn}>−</button>
+        <button onClick={handleZoomOut} style={dockBtn} aria-label="Zoom out">−</button>
         <span style={dockZoom}>{zoom}%</span>
-        <button onClick={handleZoomIn} style={dockBtn}>+</button>
+        <button onClick={handleZoomIn} style={dockBtn} aria-label="Zoom in">+</button>
         <div style={dockDivider} />
-        <button onClick={handleFit} style={{ ...dockBtn, padding: '0 10px', width: 'auto', fontFamily: 'var(--font-ui)', fontSize: 11 }}>
-          Fit lineage
+        <button onClick={handleFit} style={dockTextBtn}>Fit lineage</button>
+
+        {/* Tool mode: pan vs marquee-select */}
+        <div style={dockDivider} />
+        <button
+          onClick={() => setBoxSelect(false)}
+          style={dockToggleBtn(!boxSelect)}
+          title="Pan the canvas (drag to move)"
+          aria-pressed={!boxSelect}
+        >
+          Pan
         </button>
+        <button
+          onClick={() => setBoxSelect(true)}
+          style={dockToggleBtn(boxSelect)}
+          title="Select box (drag to select nodes)"
+          aria-pressed={boxSelect}
+        >
+          Select
+        </button>
+
+        {/* Selection actions — always present; inert until nodes are selected */}
+        <div style={dockDivider} />
+        {confirmingDelete && hasSelection ? (
+          <>
+            <span style={{ ...dockCount, color: '#ffb4b4' }}>Delete {selectedCount}?</span>
+            <button
+              onClick={() => runBulk(removeSpecs)}
+              disabled={bulkBusy}
+              style={{ ...dockActionBtn(bulkBusy), color: '#ff9d9d', borderColor: 'rgba(255,120,120,.35)', background: 'rgba(255,120,120,.12)' }}
+            >
+              {bulkBusy ? 'Deleting…' : 'Delete'}
+            </button>
+            <button onClick={() => setConfirmingDelete(false)} style={dockActionBtn(false)}>Keep</button>
+          </>
+        ) : (
+          <>
+            <span style={hasSelection ? dockCount : dockCountIdle}>
+              {hasSelection ? `${selectedCount} selected` : 'None selected'}
+            </span>
+            <button onClick={() => runBulk(duplicateSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Duplicate</button>
+            <button onClick={() => runBulk(tidySpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Tidy</button>
+            <button onClick={() => runBulk(publishSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Publish</button>
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              disabled={actionsDisabled}
+              style={{ ...dockActionBtn(actionsDisabled), color: actionsDisabled ? 'var(--text-muted)' : '#ff9d9d' }}
+            >
+              Delete
+            </button>
+            <button
+              onClick={clearSelection}
+              disabled={actionsDisabled}
+              style={{ ...dockBtn, opacity: actionsDisabled ? 0.35 : 1, cursor: actionsDisabled ? 'default' : 'pointer' }}
+              aria-label="Clear selection"
+            >
+              ✕
+            </button>
+          </>
+        )}
+
+        {bulkError && (
+          <>
+            <div style={dockDivider} />
+            <span style={dockErrorText} title={bulkError}>{bulkError}</span>
+            <button onClick={() => setBulkError(null)} style={dockBtn} aria-label="Dismiss error">✕</button>
+          </>
+        )}
+      </div>
       </div>
 
       {/* ── Panels & menus ───────────────────────────────────── */}
@@ -419,23 +601,36 @@ const emptyState: React.CSSProperties = {
   pointerEvents: 'all',
 };
 
+// The dock lives inside dockRail, which centres it in the space a side panel
+// isn't using — so its right-hand buttons can never end up under a panel.
 const zoomDock: React.CSSProperties = {
-  position: 'absolute',
-  bottom: 22,
-  left: '50%',
-  transform: 'translateX(-50%)',
   display: 'flex',
   alignItems: 'center',
   gap: 4,
   padding: 5,
   borderRadius: 13,
+  maxWidth: '100%',
+  flexWrap: 'wrap',
+  justifyContent: 'center',
   background: 'linear-gradient(168deg, rgba(255,255,255,.08), rgba(255,255,255,.03))',
   backdropFilter: 'blur(24px) saturate(135%)',
   WebkitBackdropFilter: 'blur(24px) saturate(135%)',
   border: '1px solid rgba(255,255,255,.12)',
   boxShadow: 'inset 0 1px 0 rgba(255,255,255,.18), 0 14px 34px -14px rgba(0,0,0,.7)',
-  zIndex: 60,
   pointerEvents: 'all',
+};
+
+// Full-width rail; `right` shrinks to clear whichever side panel is open, and the
+// dock centres in what's left. zIndex sits above the panels (SpecPanel is 3100)
+// so the dock is never buried — that bug made Delete unclickable.
+const dockRail: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 22,
+  left: 12,
+  display: 'flex',
+  justifyContent: 'center',
+  pointerEvents: 'none',
+  zIndex: 3200,
 };
 
 const dockBtn: React.CSSProperties = {
@@ -452,6 +647,67 @@ const dockBtn: React.CSSProperties = {
   fontSize: 16,
   fontWeight: 600,
   cursor: 'pointer',
+};
+
+const dockTextBtn: React.CSSProperties = {
+  height: 30,
+  display: 'flex',
+  alignItems: 'center',
+  padding: '0 11px',
+  background: 'transparent',
+  border: '1px solid transparent',
+  borderRadius: 7,
+  color: 'var(--text-2)',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  fontWeight: 500,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+function dockToggleBtn(active: boolean): React.CSSProperties {
+  return {
+    ...dockTextBtn,
+    background: active ? 'rgba(230,235,245,.92)' : 'transparent',
+    color: active ? '#0c0b14' : 'var(--text-muted)',
+    fontWeight: active ? 600 : 500,
+  };
+}
+
+// The selection actions are always mounted, so they need a resting (inert) state.
+function dockActionBtn(disabled: boolean): React.CSSProperties {
+  return {
+    ...dockTextBtn,
+    color: disabled ? 'var(--text-muted)' : 'var(--text-2)',
+    opacity: disabled ? 0.45 : 1,
+    cursor: disabled ? 'default' : 'pointer',
+  };
+}
+
+const dockCount: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--cyan)',
+  padding: '0 4px 0 6px',
+  whiteSpace: 'nowrap',
+  userSelect: 'none',
+};
+
+const dockErrorText: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  color: '#ff9d9d',
+  maxWidth: 260,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const dockCountIdle: React.CSSProperties = {
+  ...dockCount,
+  color: 'var(--text-muted)',
+  opacity: 0.7,
 };
 
 const dockZoom: React.CSSProperties = {

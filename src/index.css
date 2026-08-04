@@ -325,6 +325,12 @@ body {
   animation: cardEnter 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* Far zoom: recipe rows become unreadable noise, so drop them and leave the
+   drink's name + metrics. display-only — never touch transform on the node. */
+[data-zoom='far'] .spec-node__recipe {
+  display: none;
+}
+
 /* ── React Flow overrides ────────────────────────────────────────────────── */
 /* Edge paths are handled by CustomEdge; don't override stroke here */
 .react-flow__handle {

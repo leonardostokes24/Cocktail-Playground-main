@@ -4,6 +4,7 @@ import { computeSpecCosts } from '../../utils/calculations';
 import { getFormula, formulaSecondArg } from '../../utils/formulaRegistry';
 import { useProofStore } from '../../store/useProofStore';
 import Glass from '../common/Glass';
+import { typeDot } from '../common/typeDot';
 
 export type SpecNodeData = {
   onLongPress?: (nodeId: string, pos: { x: number; y: number }) => void;
@@ -55,10 +56,19 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
     ? Math.max(0, Math.min(100, gpFormula.compute(costs.modifiedCost, gpSecondArg, vatRate)))
     : 0;
 
-  // Descriptor line
+  // Descriptor line — how the drink is made (the recipe body carries what's in it).
   const descriptor = isRoot
-    ? [spec.method, spec.glass, components?.length ? `${components.length} parts` : null].filter(Boolean).join(' · ')
-    : spec.change_note ? `Fork · ${spec.change_note}` : 'Fork';
+    ? [spec.method, spec.glass].filter(Boolean).join(' · ')
+    : spec.change_note ? `Twist · ${spec.change_note}` : 'Twist';
+
+  // Metrics collapse to one quiet footer line — pricing is secondary to the recipe.
+  const metrics = costs
+    ? [
+        `${costs.finalAbvPct.toFixed(1)}% ABV`,
+        `${Math.round(costs.finalVolumeMl)}ml`,
+        costs.fullyPriced ? `${Math.round(gpPct)}% GP` : 'unpriced',
+      ].join(' · ')
+    : null;
 
   return (
     <Glass
@@ -84,44 +94,29 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
         )}
       </div>
 
-      {/* Row 2: Gauge row */}
-      <div style={gaugeRow}>
-        {/* GP conic ring — only once every component is priced. Pricing is optional,
-            so the drink's composition (ABV, volume) leads until then. */}
-        {costs?.fullyPriced ? (
-          <div className="gp-gauge" style={{ '--gp': gpPct } as React.CSSProperties}>
-            <div className="gp-gauge__inner">
-              <span className="gp-gauge__num">{Math.round(gpPct)}</span>
-              <span className="gp-gauge__unit">GP%</span>
+      {/* Row 2: the recipe — what's actually in the drink */}
+      <div className="spec-node__recipe" style={recipeBody}>
+        {components?.length ? (
+          components.map((c) => (
+            <div key={c.id} style={recipeRow}>
+              <span style={amountCell}>
+                {c.original_amount ?? c.amount_ml}
+                <i style={unitCell}>&thinsp;{c.original_unit ?? 'ml'}</i>
+              </span>
+              <span style={typeDot(c.ingredients?.type, 5)} />
+              <span style={ingredientName} title={c.ingredients?.name ?? undefined}>
+                {c.ingredients?.name ?? '—'}
+              </span>
             </div>
-          </div>
+          ))
         ) : (
-          <div style={unpricedBadge}>
-            <span style={{ fontFamily: 'var(--font-ui)', fontSize: 9.5, fontWeight: 600, color: 'var(--mute)', letterSpacing: '0.04em' }}>
-              unpriced
-            </span>
-          </div>
+          <p style={emptyRecipe}>No ingredients yet</p>
         )}
-
-        {/* ABV + Volume readouts */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <span className="readout">
-            <b>{costs ? costs.finalAbvPct.toFixed(1) : '—'}</b>
-            <i>&nbsp;% ABV</i>
-          </span>
-          <span className="readout">
-            <b>{costs ? Math.round(costs.finalVolumeMl) : '—'}</b>
-            <i>&nbsp;ml</i>
-          </span>
-        </div>
       </div>
 
-      {/* Footer: attribution + status */}
+      {/* Footer: metrics + status */}
       <div style={footer}>
-        <span style={attribution}>
-          {spec.method || 'Spec'}
-          {spec.glass ? <span style={{ color: 'var(--text-muted)' }}> · {spec.glass}</span> : null}
-        </span>
+        <span style={attribution}>{metrics ?? spec.method ?? 'Spec'}</span>
         <span style={isPublished ? statusCommons : statusPrivate}>
           {isPublished
             ? <><span style={dot} />Commons</>
@@ -180,23 +175,53 @@ const rootBadge: React.CSSProperties = {
   marginLeft: 8,
 };
 
-const gaugeRow: React.CSSProperties = {
+const recipeBody: React.CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  gap: 16,
-  marginTop: 13,
+  flexDirection: 'column',
+  gap: 3,
+  marginTop: 12,
+  paddingTop: 11,
+  borderTop: '1px solid rgba(255,255,255,.09)',
 };
 
-const unpricedBadge: React.CSSProperties = {
-  width: 52,
-  height: 52,
-  borderRadius: '50%',
-  border: '1px dashed rgba(255,255,255,.18)',
+const recipeRow: React.CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  textAlign: 'center',
+  alignItems: 'baseline',
+  gap: 7,
+};
+
+// Fixed mono gutter — amounts line up into a scannable column across the card.
+const amountCell: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 11,
+  color: 'var(--text-2)',
+  width: 52,
+  textAlign: 'right',
   flexShrink: 0,
+  whiteSpace: 'nowrap',
+};
+
+const unitCell: React.CSSProperties = {
+  fontStyle: 'normal',
+  fontSize: 9,
+  color: 'var(--text-muted)',
+};
+
+const ingredientName: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11.5,
+  color: 'var(--text)',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  minWidth: 0,
+};
+
+const emptyRecipe: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  color: 'var(--text-muted)',
+  margin: 0,
 };
 
 const footer: React.CSSProperties = {
@@ -209,9 +234,9 @@ const footer: React.CSSProperties = {
 };
 
 const attribution: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 10.5,
-  color: 'var(--text-2)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 9.5,
+  color: 'var(--text-muted)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',

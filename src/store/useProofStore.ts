@@ -63,8 +63,15 @@ interface ProofState {
   createSpec: (input: SpecInput) => Promise<Spec>;
   editSpec: (id: string, input: Partial<SpecInput>) => Promise<void>;
   removeSpec: (id: string) => Promise<void>;
+  // ── Bulk actions on a canvas selection ────────────────────────
+  removeSpecs: (ids: string[]) => Promise<void>;
+  duplicateSpecs: (ids: string[]) => Promise<void>;
+  tidySpecs: (ids: string[]) => Promise<void>;
+  publishSpecs: (ids: string[]) => Promise<void>;
   selectSpec: (id: string | null) => void;
-  branchSpec: (parentId: string) => Promise<void>;
+  branchSpec: (parentId: string, position?: { x: number; y: number }) => Promise<Spec>;
+  // Re-parent an existing spec under another (drag-to-attach). Cycle-guarded.
+  attachBranch: (childId: string, parentId: string) => Promise<boolean>;
 
   // ── Spec Cost Map (from spec_costs view) ─────────────────────
   specCostMap: Record<string, SpecCostRow>;
@@ -174,22 +181,96 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
     set((s) => ({ specs: s.specs.map((sp) => (sp.id === id ? updated : sp)) }));
   },
   removeSpec: async (id) => {
-    await deleteSpec(id);
+    await get().removeSpecs([id]);
+  },
+  removeSpecs: async (ids) => {
+    if (!ids.length) return;
+    for (const id of ids) await deleteSpec(id);
+
+    const gone = new Set(ids);
     set((s) => {
-      const { [id]: _removed, ...specComponentsMap } = s.specComponentsMap;
+      const specComponentsMap = { ...s.specComponentsMap };
+      for (const id of ids) delete specComponentsMap[id];
+      const selectionRemoved = s.selectedSpecId != null && gone.has(s.selectedSpecId);
       return {
-        specs: s.specs.filter((sp) => sp.id !== id),
-        selectedSpecId: s.selectedSpecId === id ? null : s.selectedSpecId,
-        specComponents: s.selectedSpecId === id ? [] : s.specComponents,
+        // specs.parent_spec_id is ON DELETE SET NULL, so surviving children of a
+        // deleted spec become roots — mirror that locally or the canvas would draw
+        // an edge from a node that no longer exists.
+        specs: s.specs
+          .filter((sp) => !gone.has(sp.id))
+          .map((sp) => (sp.parent_spec_id && gone.has(sp.parent_spec_id) ? { ...sp, parent_spec_id: null } : sp)),
+        selectedSpecId: selectionRemoved ? null : s.selectedSpecId,
+        specComponents: selectionRemoved ? [] : s.specComponents,
         specComponentsMap,
       };
     });
+  },
+  duplicateSpecs: async (ids) => {
+    for (const id of ids) {
+      const source = get().specs.find((s) => s.id === id);
+      if (!source) continue;
+      const sourceComponents = await listSpecComponents(id);
+
+      // A copy is an independent spec — no parent, so it starts its own lineage.
+      const copy = await insertSpec({
+        name: `${source.name} (copy)`,
+        method: source.method,
+        glass: source.glass,
+        garnish: source.garnish,
+        build_text: source.build_text,
+        sale_price: source.sale_price,
+        canvas_x: source.canvas_x + 40,
+        canvas_y: source.canvas_y + 40,
+      });
+
+      const copied: SpecComponent[] = [];
+      for (const c of sourceComponents) {
+        copied.push(await insertSpecComponent({
+          spec_id: copy.id,
+          ingredient_id: c.ingredient_id,
+          prep_id: c.prep_id,
+          amount_ml: c.amount_ml,
+          original_amount: c.original_amount,
+          original_unit: c.original_unit,
+          position: c.position,
+        }));
+      }
+
+      set((s) => ({
+        specs: [...s.specs, copy],
+        specComponentsMap: { ...s.specComponentsMap, [copy.id]: copied },
+      }));
+    }
+  },
+  tidySpecs: async (ids) => {
+    const chosen = get().specs.filter((s) => ids.includes(s.id));
+    if (!chosen.length) return;
+
+    // Keep the cluster where it is, then lay it out in reading order.
+    const originX = Math.min(...chosen.map((s) => s.canvas_x));
+    const originY = Math.min(...chosen.map((s) => s.canvas_y));
+    const perRow = Math.ceil(Math.sqrt(chosen.length));
+    const ordered = [...chosen].sort((a, b) => (a.canvas_y - b.canvas_y) || (a.canvas_x - b.canvas_x));
+
+    for (let i = 0; i < ordered.length; i++) {
+      await get().editSpec(ordered[i].id, {
+        canvas_x: originX + (i % perRow) * 300,
+        canvas_y: originY + Math.floor(i / perRow) * 300,
+      });
+    }
+  },
+  publishSpecs: async (ids) => {
+    for (const id of ids) {
+      const spec = get().specs.find((s) => s.id === id);
+      if (!spec || spec.status === 'published') continue; // published rows are immutable
+      await get().publishSpec(id);
+    }
   },
   selectSpec: (id) => {
     set({ selectedSpecId: id, specComponents: [] });
     if (id) get().loadSpecComponents(id);
   },
-  branchSpec: async (parentId) => {
+  branchSpec: async (parentId, position) => {
     const { specs } = get();
     const parent = specs.find((s) => s.id === parentId);
     if (!parent) throw new Error('Parent spec not found');
@@ -197,7 +278,7 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
     const parentComponents = await listSpecComponents(parentId);
 
     const child = await insertSpec({
-      name: `${parent.name} (riff)`,
+      name: `${parent.name} (twist)`,
       parent_spec_id: parentId,
       change_note: '',
       method: parent.method,
@@ -205,8 +286,9 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
       garnish: parent.garnish,
       build_text: parent.build_text,
       sale_price: parent.sale_price,
-      canvas_x: parent.canvas_x + 280,
-      canvas_y: parent.canvas_y + 140,
+      canvas_x: position ? position.x : parent.canvas_x + 300,
+      // Nodes are as tall as their recipe, so offset a twist generously to clear the parent.
+      canvas_y: position ? position.y : parent.canvas_y + 220,
     });
 
     const childComponents: SpecComponent[] = [];
@@ -227,6 +309,13 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
       specComponentsMap: { ...s.specComponentsMap, [child.id]: childComponents },
     }));
     get().selectSpec(child.id);
+    return child;
+  },
+  attachBranch: async (childId, parentId) => {
+    if (childId === parentId) return false;
+    if (wouldCreateCycle(get().specs, childId, parentId)) return false;
+    await get().editSpec(childId, { parent_spec_id: parentId });
+    return true;
   },
 
   // ── Spec Cost Map ─────────────────────────────────────────────

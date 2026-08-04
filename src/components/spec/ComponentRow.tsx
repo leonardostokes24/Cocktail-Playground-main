@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { toMl, UNITS } from '../../utils/units';
+import { typeDot } from '../common/typeDot';
 import type { SpecComponent } from '../../store/useProofStore';
 
 interface Props {
@@ -82,21 +83,6 @@ export default function ComponentRow({ component, onUpdate, onRemove }: Props) {
       <button onClick={() => onRemove(component.id)} style={delBtn} title="Remove">✕</button>
     </div>
   );
-}
-
-const TYPE_COLORS: Record<string, string> = {
-  spirit:    'var(--type-spirit)',
-  modifier:  'var(--type-modifier)',
-  citrus:    'var(--type-citrus)',
-  sweetener: 'var(--type-sweetener)',
-  bitters:   'var(--type-bitters)',
-};
-
-function typeDot(type: string): React.CSSProperties {
-  return {
-    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-    background: TYPE_COLORS[type] ?? 'rgba(255,255,255,.3)',
-  };
 }
 
 const miniInp: React.CSSProperties = {
