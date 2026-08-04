@@ -12,6 +12,7 @@ import { useProofStore } from '../../store/useProofStore';
 import SpecNodeComponent from './SpecNode';
 import GradientEdge from '../CustomEdge';
 import IngredientLibrary from '../library/IngredientLibrary';
+import PrepLibrary from '../library/PrepLibrary';
 import SpecPanel from '../spec/SpecPanel';
 import SettingsPanel from '../spec/SettingsPanel';
 import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
@@ -55,6 +56,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   })));
 
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showPreps, setShowPreps] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
@@ -177,6 +179,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const openPanelWidth = Math.max(
     selectedSpecId ? 560 : 0,          // SpecPanel
     showLibrary ? 680 : 0,             // IngredientLibrary
+    showPreps ? 620 : 0,               // PrepLibrary
     showSettings ? 420 : 0,            // SettingsPanel
     canvasMode === 'commons' ? 500 : 0 // CommonsPanel (480 + 20 right margin)
   );
@@ -323,6 +326,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
                 <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>▾</span>
               </button>
               <button onClick={() => setShowLibrary(true)} style={toolbarBtn}>Library</button>
+              <button onClick={() => setShowPreps(true)} style={toolbarBtn}>Preps</button>
               <button onClick={handleNewSpec} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>+ New Spec</button>
               <button onClick={onLogoutClick} style={toolbarBtn}>Sign Out</button>
             </>
@@ -475,6 +479,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
       {/* ── Panels & menus ───────────────────────────────────── */}
       {showLibrary && <IngredientLibrary onClose={() => setShowLibrary(false)} />}
+      {showPreps && <PrepLibrary onClose={() => setShowPreps(false)} />}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {selectedSpecId && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
       {canvasMode === 'commons' && <CommonsPanel onClose={() => setCanvasMode('canvas')} />}

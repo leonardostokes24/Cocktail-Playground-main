@@ -18,10 +18,33 @@ import {
   type CatalogueIngredient,
 } from '../lib/supabase/catalogue';
 import {
+  listPreps, insertPrep, updatePrep, deletePrep,
+  listPrepComponents, insertPrepComponent, updatePrepComponent, deletePrepComponent,
+  listPrepCosts,
+  type Prep, type PrepInput, type PrepComponent, type PrepComponentInput, type PrepCostRow,
+} from '../lib/supabase/preps';
+import {
   listPublishedFeed, searchPublished, insertPublishedSpec, forkPublishedSpec,
   getSpecLineage,
   type PublishedSpec, type ComponentSnapshot, type LineageRow,
 } from '../lib/supabase/published';
+
+// A prep component's join only carries the prep's name — cost lives in the
+// prep_costs view, which PostgREST can't embed through a FK. Fill it in here.
+// A prep with unpriced ingredients reports cost_per_ml as null so the cost
+// engine marks the line unpriced rather than misleadingly cheap (⚑ 0005/0007).
+function enrichPrep(c: SpecComponent, costs: Record<string, PrepCostRow>): SpecComponent {
+  if (!c.prep_id) return c;
+  const cost = costs[c.prep_id];
+  return {
+    ...c,
+    preps: {
+      name: c.preps?.name ?? 'Prep',
+      cost_per_ml: !cost || cost.unpriced_count > 0 ? null : Number(cost.cost_per_ml),
+      abv: cost ? Number(cost.abv) : 0,
+    },
+  };
+}
 
 function groupBySpecId(components: SpecComponent[]): Record<string, SpecComponent[]> {
   const map: Record<string, SpecComponent[]> = {};
@@ -132,8 +155,26 @@ interface ProofState {
   // Fork several published specs onto the canvas at once, laid out on a grid.
   preloadPublished: (publishedIds: string[]) => Promise<void>;
 
-  // ── Phase 3 stubs ─────────────────────────────────────────────
-  preps: unknown[];
+  // ── Preps (batched sub-recipes) ───────────────────────────────
+  preps: Prep[];
+  prepsLoading: boolean;
+  prepComponentsMap: Record<string, PrepComponent[]>;
+  prepCosts: Record<string, PrepCostRow>;
+  loadPreps: () => Promise<void>;
+  loadPrepCosts: () => Promise<void>;
+  addPrep: (input: PrepInput) => Promise<Prep>;
+  editPrep: (id: string, input: Partial<PrepInput>) => Promise<void>;
+  removePrep: (id: string) => Promise<void>;
+  loadPrepComponents: (prepId: string) => Promise<void>;
+  addPrepComponent: (input: PrepComponentInput) => Promise<void>;
+  editPrepComponent: (
+    id: string,
+    input: Partial<Pick<PrepComponentInput, 'amount_ml' | 'original_amount' | 'original_unit' | 'position'>>
+  ) => Promise<void>;
+  removePrepComponent: (prepId: string, id: string) => Promise<void>;
+
+  // Drag-reorder writes many positions at once (editComponent patches one).
+  reorderComponents: (specId: string, orderedIds: string[]) => Promise<void>;
 }
 
 export const useProofStore = create<ProofState>()(persist((set, get) => ({
@@ -344,7 +385,11 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
   loadSpecComponents: async (specId) => {
     set({ componentsLoading: true });
     try {
-      set({ specComponents: await listSpecComponents(specId), componentsLoading: false });
+      const comps = await listSpecComponents(specId);
+      set((s) => ({
+        specComponents: comps.map((c) => enrichPrep(c, s.prepCosts)),
+        componentsLoading: false,
+      }));
     } catch {
       set({ componentsLoading: false });
     }
@@ -388,7 +433,8 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
   specComponentsMap: {},
   loadAllSpecComponents: async () => {
     try {
-      set({ specComponentsMap: groupBySpecId(await listAllSpecComponents()) });
+      const all = await listAllSpecComponents();
+      set((s) => ({ specComponentsMap: groupBySpecId(all.map((c) => enrichPrep(c, s.prepCosts))) }));
     } catch {
       // non-fatal — canvas cards just show no component list
     }
@@ -566,8 +612,114 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
     get().selectSpec(null); // don't leave the last one's panel open after a batch add
   },
 
-  // ── Stubs ─────────────────────────────────────────────────────
+  // ── Preps ─────────────────────────────────────────────────────
   preps: [],
+  prepsLoading: false,
+  prepComponentsMap: {},
+  prepCosts: {},
+
+  loadPreps: async () => {
+    set({ prepsLoading: true });
+    try {
+      set({ preps: await listPreps(), prepsLoading: false });
+      await get().loadPrepCosts();
+    } catch {
+      set({ prepsLoading: false });
+    }
+  },
+  loadPrepCosts: async () => {
+    try {
+      const rows = await listPrepCosts();
+      const byId: Record<string, PrepCostRow> = {};
+      for (const r of rows) byId[r.prep_id] = r;
+      set({ prepCosts: byId });
+      // Costs feed the prep half of every spec component — refresh the joins.
+      set((s) => ({
+        specComponentsMap: Object.fromEntries(
+          Object.entries(s.specComponentsMap).map(([id, comps]) => [id, comps.map((c) => enrichPrep(c, byId))])
+        ),
+        specComponents: s.specComponents.map((c) => enrichPrep(c, byId)),
+      }));
+    } catch {
+      // non-fatal — prep-based lines just read as unpriced
+    }
+  },
+  addPrep: async (input) => {
+    const prep = await insertPrep(input);
+    set((s) => ({ preps: [...s.preps, prep].sort((a, b) => a.name.localeCompare(b.name)) }));
+    await get().loadPrepCosts();
+    return prep;
+  },
+  editPrep: async (id, input) => {
+    const updated = await updatePrep(id, input);
+    set((s) => ({ preps: s.preps.map((p) => (p.id === id ? updated : p)) }));
+    await get().loadPrepCosts(); // yield_ml changes the whole rollup
+  },
+  removePrep: async (id) => {
+    await deletePrep(id);
+    set((s) => {
+      const { [id]: _gone, ...prepComponentsMap } = s.prepComponentsMap;
+      return { preps: s.preps.filter((p) => p.id !== id), prepComponentsMap };
+    });
+  },
+  loadPrepComponents: async (prepId) => {
+    try {
+      const comps = await listPrepComponents(prepId);
+      set((s) => ({ prepComponentsMap: { ...s.prepComponentsMap, [prepId]: comps } }));
+    } catch {
+      // non-fatal
+    }
+  },
+  addPrepComponent: async (input) => {
+    const comp = await insertPrepComponent(input);
+    set((s) => ({
+      prepComponentsMap: {
+        ...s.prepComponentsMap,
+        [input.prep_id]: [...(s.prepComponentsMap[input.prep_id] ?? []), comp],
+      },
+    }));
+    await get().loadPrepCosts();
+  },
+  editPrepComponent: async (id, input) => {
+    const updated = await updatePrepComponent(id, input);
+    set((s) => ({
+      prepComponentsMap: Object.fromEntries(
+        Object.entries(s.prepComponentsMap).map(([pid, comps]) => [
+          pid, comps.map((c) => (c.id === id ? updated : c)),
+        ])
+      ),
+    }));
+    await get().loadPrepCosts();
+  },
+  removePrepComponent: async (prepId, id) => {
+    await deletePrepComponent(id);
+    set((s) => ({
+      prepComponentsMap: {
+        ...s.prepComponentsMap,
+        [prepId]: (s.prepComponentsMap[prepId] ?? []).filter((c) => c.id !== id),
+      },
+    }));
+    await get().loadPrepCosts();
+  },
+
+  reorderComponents: async (specId, orderedIds) => {
+    // Optimistic: reflect the new order immediately so dragging feels instant,
+    // then persist a dense 0..n-1 sequence.
+    set((s) => {
+      const byId = new Map((s.specComponentsMap[specId] ?? []).map((c) => [c.id, c]));
+      const reordered = orderedIds
+        .map((id, i) => { const c = byId.get(id); return c ? { ...c, position: i } : null; })
+        .filter(Boolean) as SpecComponent[];
+      if (reordered.length !== orderedIds.length) return {};
+      return {
+        specComponentsMap: { ...s.specComponentsMap, [specId]: reordered },
+        specComponents: s.selectedSpecId === specId ? reordered : s.specComponents,
+      };
+    });
+    for (let i = 0; i < orderedIds.length; i++) {
+      await updateSpecComponent(orderedIds[i], { position: i });
+    }
+  },
 }),
 {
   name: 'proof-settings',
@@ -584,4 +736,5 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
 
 export type { Ingredient, IngredientInput, Spec, SpecInput, SpecComponent, SpecComponentInput, SpecCostRow };
 export type { CatalogueIngredient, PublishedSpec, ComponentSnapshot, LineageRow };
+export type { Prep, PrepInput, PrepComponent, PrepComponentInput, PrepCostRow };
 export { DILUTION_DEFAULTS };

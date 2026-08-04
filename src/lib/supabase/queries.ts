@@ -156,6 +156,11 @@ export type SpecComponent = {
   position: number;
   // joined
   ingredients?: Pick<Ingredient, 'name' | 'type' | 'abv' | 'cost_per_ml'> | null;
+  // Prep components carry the prep's name from the join; cost_per_ml/abv are
+  // filled in from the prep_costs view by the store (a view can't be embedded
+  // through a FK). cost_per_ml stays null while the prep has unpriced
+  // ingredients, so computeSpecCosts treats it as unpriced rather than cheap.
+  preps?: { name: string; cost_per_ml: number | null; abv: number } | null;
 };
 
 export type SpecComponentInput = {
@@ -171,7 +176,7 @@ export type SpecComponentInput = {
 export async function listSpecComponents(specId: string): Promise<SpecComponent[]> {
   const { data, error } = await supabase
     .from('spec_components')
-    .select('*, ingredients(name, type, abv, cost_per_ml)')
+    .select('*, ingredients(name, type, abv, cost_per_ml), preps(name)')
     .eq('spec_id', specId)
     .order('position');
   if (error) throw error;
@@ -182,7 +187,7 @@ export async function listAllSpecComponents(): Promise<SpecComponent[]> {
   const user = await currentUser();
   const { data, error } = await supabase
     .from('spec_components')
-    .select('*, ingredients(name, type, abv, cost_per_ml)')
+    .select('*, ingredients(name, type, abv, cost_per_ml), preps(name)')
     .eq('user_id', user.id)
     .order('position');
   if (error) throw error;
@@ -194,7 +199,7 @@ export async function insertSpecComponent(input: SpecComponentInput): Promise<Sp
   const { data, error } = await supabase
     .from('spec_components')
     .insert({ ...input, user_id: user.id })
-    .select('*, ingredients(name, type, abv, cost_per_ml)')
+    .select('*, ingredients(name, type, abv, cost_per_ml), preps(name)')
     .single();
   if (error) throw error;
   return data as SpecComponent;
@@ -208,7 +213,7 @@ export async function updateSpecComponent(
     .from('spec_components')
     .update(input)
     .eq('id', id)
-    .select('*, ingredients(name, type, abv, cost_per_ml)')
+    .select('*, ingredients(name, type, abv, cost_per_ml), preps(name)')
     .single();
   if (error) throw error;
   return data as SpecComponent;
