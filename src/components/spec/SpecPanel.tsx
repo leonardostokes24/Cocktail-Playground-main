@@ -4,7 +4,7 @@ import { computeSpecCosts } from '../../utils/calculations';
 import { formulaRegistry, formulaSecondArg } from '../../utils/formulaRegistry';
 import SpecFields from './SpecFields';
 import ComponentRow from './ComponentRow';
-import AddComponentForm from './AddComponentForm';
+import RecipeBuilder from '../builder/RecipeBuilder';
 
 interface Props {
   specId: string;
@@ -13,15 +13,12 @@ interface Props {
 
 export default function SpecPanel({ specId, onClose }: Props) {
   const {
-    specs, specComponents, componentsLoading, ingredients, dilutionOverrides,
+    specs, specComponents, componentsLoading, dilutionOverrides,
     vatRate, sundriesPerServe, wasteRate, targetGpPct, activeFormulaId,
-    editSpec, addComponent, editComponent, removeComponent, setActiveFormulaId,
+    editSpec, setActiveFormulaId,
     branchSpec, publishSpec,
-    catalogueIngredients, loadCatalogueIngredients, importCatalogueIngredient,
   } = useProofStore();
-
-  useEffect(() => { loadCatalogueIngredients(); }, [loadCatalogueIngredients]);
-  const [addingComponent, setAddingComponent] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [publishing, setPublishing] = useState(false);
@@ -43,15 +40,6 @@ export default function SpecPanel({ specId, onClose }: Props) {
     if (trimmed && spec && trimmed !== spec.name) editSpec(specId, { name: trimmed });
     setEditingName(false);
   };
-
-  const handleUpdateComponent = useCallback(async (id: string, amountMl: number, originalAmount: number, originalUnit: string) => {
-    await editComponent(id, { amount_ml: amountMl, original_amount: originalAmount, original_unit: originalUnit });
-  }, [editComponent]);
-
-  const handleAddComponent = useCallback(async (payload: Parameters<typeof addComponent>[0]) => {
-    await addComponent(payload);
-    setAddingComponent(false);
-  }, [addComponent]);
 
   const handleBranch = useCallback(async () => {
     await branchSpec(specId);
@@ -124,37 +112,21 @@ export default function SpecPanel({ specId, onClose }: Props) {
           <SpecFields spec={spec} onSave={handleSaveField} />
         </section>
 
-        {/* BUILD section */}
+        {/* BUILD section — read-only; the block builder owns recipe editing */}
         <section style={sectionStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <p style={{ ...sectionLabel, margin: 0 }}>Build</p>
-            {!addingComponent && (
-              <button onClick={() => setAddingComponent(true)} style={addBtnStyle}>+ Add</button>
-            )}
+            <button onClick={() => setBuilderOpen(true)} style={addBtnStyle}>Edit recipe</button>
           </div>
-
-          {addingComponent && (
-            <div style={{ marginBottom: 12 }}>
-              <AddComponentForm
-                ingredients={ingredients}
-                catalogueIngredients={catalogueIngredients}
-                onResolveCatalogue={importCatalogueIngredient}
-                nextPosition={specComponents.length}
-                specId={specId}
-                onAdd={handleAddComponent}
-                onCancel={() => setAddingComponent(false)}
-              />
-            </div>
-          )}
 
           {componentsLoading ? (
             <p style={dimStyle}>Loading…</p>
           ) : specComponents.length === 0 ? (
-            <p style={dimStyle}>No ingredients yet — add one above.</p>
+            <p style={dimStyle}>No ingredients yet — open the builder to start.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {specComponents.map((c) => (
-                <ComponentRow key={c.id} component={c} onUpdate={handleUpdateComponent} onRemove={removeComponent} />
+                <ComponentRow key={c.id} component={c} />
               ))}
             </div>
           )}
@@ -234,6 +206,8 @@ export default function SpecPanel({ specId, onClose }: Props) {
           {publishing ? 'Publishing…' : spec.status === 'published' ? '✓ Published' : '↑ Publish to commons'}
         </button>
       </div>
+
+      {builderOpen && <RecipeBuilder specId={specId} onClose={() => setBuilderOpen(false)} />}
     </div>
   );
 }

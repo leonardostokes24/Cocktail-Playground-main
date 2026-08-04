@@ -368,3 +368,83 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 2px; }
+
+/* ── Recipe builder blocks ───────────────────────────────────────────────── */
+/* The notch is the builder's signature: blocks carry a tab on the bottom edge
+   and a socket on the top, so a stack reads as physically interlocked rather
+   than as a list of cards. Pseudo-elements, hence CSS rather than inline style. */
+
+.blk {
+  position: relative;
+  border-radius: 10px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.13);
+}
+
+/* tab poking down into the block below */
+.blk::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  bottom: -5px;
+  width: 24px;
+  height: 6px;
+  border-radius: 0 0 6px 6px;
+  background: inherit;
+  border: 1px solid rgba(255,255,255,.13);
+  border-top: none;
+  z-index: 1;
+}
+
+/* socket carved out of the top edge */
+.blk::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: -1px;
+  width: 24px;
+  height: 5px;
+  border-radius: 0 0 6px 6px;
+  background: rgba(10,9,18,.5);
+  z-index: 2;
+}
+
+/* last block in a run has nothing to join onto */
+.blk--tail::after { display: none; }
+/* first block sits under the container lip, so no socket */
+.blk--head::before { display: none; }
+
+.blk--dragging {
+  opacity: .5;
+}
+
+/* Container block: an indented well its children drop into. */
+.blk-well {
+  border-radius: 10px;
+  background: rgba(0,0,0,.26);
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.blk-well--over {
+  border-color: rgba(127,230,255,.45);
+  background: rgba(127,230,255,.07);
+}
+
+/* Palette items read as the same material, one step quieter. */
+.blk-chip {
+  position: relative;
+  border-radius: 8px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.11);
+  cursor: grab;
+}
+.blk-chip:hover { background: rgba(255,255,255,.09); }
+.blk-chip:active { cursor: grabbing; }
+
+@media (prefers-reduced-motion: reduce) {
+  .blk, .blk-chip { transition: none !important; }
+}
