@@ -4,6 +4,7 @@ import { computeSpecCosts } from '../../utils/calculations';
 import { getFormula, formulaSecondArg } from '../../utils/formulaRegistry';
 import { useProofStore } from '../../store/useProofStore';
 import Glass from '../common/Glass';
+import { clampLines } from '../common/clampLines';
 import { typeDot } from '../common/typeDot';
 
 export type SpecNodeData = {
@@ -143,11 +144,10 @@ const handle: React.CSSProperties = {
 
 const nameStyle: React.CSSProperties = {
   fontSize: 21,
-  lineHeight: 1,
+  // 1.12 rather than 1 so the second line's descenders aren't clipped.
+  lineHeight: 1.12,
   margin: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
+  ...clampLines(2),
 };
 
 const descriptorStyle: React.CSSProperties = {

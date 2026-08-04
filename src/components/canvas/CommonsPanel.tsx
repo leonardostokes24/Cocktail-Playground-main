@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useProofStore, type PublishedSpec, type LineageRow } from '../../store/useProofStore';
+import { clampLines } from '../common/clampLines';
 
 // Seeded system account that owns the IBA classics.
 const IBA_USER_ID = '00000000-0000-4000-a000-000000000001';
@@ -173,7 +174,7 @@ function SpecCard({ spec, forking, onFork, expanded, onToggleLineage, lineage, l
       <div style={cardRow}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em' }}>
+          <span style={cardName} title={spec.name}>
             {spec.name}
           </span>
           {spec.method && (
@@ -259,7 +260,7 @@ function LineageTrail({ rows, focusId }: { rows: LineageRow[]; focusId: string }
           return (
             <div key={row.id} style={{ ...lineageRow, paddingLeft: (row.depth - minDepth) * 14 }}>
               <span style={isFocus ? lineageDotFocus : lineageDot} />
-              <span style={isFocus ? lineageNameFocus : lineageName}>{row.name}</span>
+              <span style={isFocus ? lineageNameFocus : lineageName} title={row.name}>{row.name}</span>
               <span style={lineageCreator}>
                 {row.creator_id === IBA_USER_ID ? 'IBA Official' : row.creator_id.slice(0, 8)}
               </span>
@@ -314,13 +315,24 @@ const lineageDotFocus: React.CSSProperties = {
   boxShadow: '0 0 0 3px rgba(127,230,255,.15)',
 };
 
+const cardName: React.CSSProperties = {
+  fontFamily: 'var(--font-display)',
+  fontSize: 15,
+  fontWeight: 700,
+  color: 'var(--text)',
+  letterSpacing: '-0.01em',
+  lineHeight: 1.2,
+  minWidth: 0,
+  ...clampLines(2),
+};
+
 const lineageName: React.CSSProperties = {
   fontFamily: 'var(--font-ui)',
   fontSize: 11.5,
   color: 'var(--text-2)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
+  lineHeight: 1.25,
+  minWidth: 0,
+  ...clampLines(2),
 };
 
 const lineageNameFocus: React.CSSProperties = {
