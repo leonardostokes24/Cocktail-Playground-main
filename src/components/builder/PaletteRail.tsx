@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import type { Ingredient, CatalogueIngredient, Prep } from '../../store/useProofStore';
 import { typeDot } from '../common/typeDot';
@@ -45,7 +45,7 @@ export default function PaletteRail({ ingredients, catalogue, preps, onAdd }: Pr
   );
 
   return (
-    <div style={rail}>
+    <div className="builder-rail" style={rail}>
       <input
         value={query}
         onChange={e => setQuery(e.target.value)}
@@ -86,6 +86,23 @@ function PaletteChip({ item, onAdd }: { item: PaletteItem; onAdd: (i: PaletteIte
     data: { paletteItem: item },
   });
 
+  // The chip is both draggable and tappable, so a completed drag would also fire
+  // a click and add the ingredient twice. Only treat it as a tap if the pointer
+  // barely moved between down and up.
+  const downAt = useRef<{ x: number; y: number } | null>(null);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    downAt.current = { x: e.clientX, y: e.clientY };
+    listeners?.onPointerDown?.(e);
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    const start = downAt.current;
+    downAt.current = null;
+    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 5) return; // that was a drag
+    onAdd(item);
+  };
+
   return (
     <div
       ref={setNodeRef}
@@ -93,8 +110,9 @@ function PaletteChip({ item, onAdd }: { item: PaletteItem; onAdd: (i: PaletteIte
       style={{ ...chip, opacity: isDragging ? 0.4 : 1 }}
       {...attributes}
       {...listeners}
+      onPointerDown={handlePointerDown}
       // Tap-to-append: the reliable path on touch and for keyboard users.
-      onClick={() => onAdd(item)}
+      onClick={handleClick}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAdd(item); } }}
       role="button"
       tabIndex={0}

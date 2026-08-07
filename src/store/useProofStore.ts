@@ -386,10 +386,16 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
     set({ componentsLoading: true });
     try {
       const comps = await listSpecComponents(specId);
-      set((s) => ({
-        specComponents: comps.map((c) => enrichPrep(c, s.prepCosts)),
-        componentsLoading: false,
-      }));
+      set((s) => {
+        const enriched = comps.map((c) => enrichPrep(c, s.prepCosts));
+        return {
+          specComponents: enriched,
+          // Keep the map in step — the builder reads specComponentsMap[specId],
+          // so filling only the flat list left it showing stale data.
+          specComponentsMap: { ...s.specComponentsMap, [specId]: enriched },
+          componentsLoading: false,
+        };
+      });
     } catch {
       set({ componentsLoading: false });
     }

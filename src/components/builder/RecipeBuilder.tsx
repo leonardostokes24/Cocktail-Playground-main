@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor,
   closestCenter, useSensor, useSensors,
@@ -56,7 +57,8 @@ export default function RecipeBuilder({ specId, onClose }: Props) {
     [specComponentsMap, specId]
   );
 
-  const [dragging, setDragging] = useState<string | null>(null);
+  // Label shown in the drag ghost — the dragged thing's name, not a generic string.
+  const [draggingLabel, setDraggingLabel] = useState<string | null>(null);
 
   useEffect(() => {
     loadIngredients();
@@ -105,10 +107,16 @@ export default function RecipeBuilder({ specId, onClose }: Props) {
     });
   }, [spec, specId, components.length, addComponent, importCatalogueIngredient]);
 
-  const handleDragStart = useCallback((e: DragStartEvent) => setDragging(String(e.active.id)), []);
+  const handleDragStart = useCallback((e: DragStartEvent) => {
+    const item = e.active.data.current?.paletteItem as PaletteItem | undefined;
+    if (item) { setDraggingLabel(item.name); return; }
+    const moving = components.find(c => c.id === String(e.active.id));
+    const ref = moving?.prep_id ? moving.preps : moving?.ingredients;
+    setDraggingLabel(ref?.name ?? 'Moving');
+  }, [components]);
 
   const handleDragEnd = useCallback(async (e: DragEndEvent) => {
-    setDragging(null);
+    setDraggingLabel(null);
     const { active, over } = e;
     if (!over) return;
 
@@ -134,15 +142,18 @@ export default function RecipeBuilder({ specId, onClose }: Props) {
 
   if (!spec) return null;
 
-  return (
-    <div style={overlay} role="dialog" aria-label={`Edit ${spec.name}`}>
+  // Portalled to <body>: SpecPanel (this component's parent) sets backdrop-filter,
+  // which makes it a containing block for position:fixed descendants — the overlay
+  // was being squeezed into the 560px drawer instead of covering the viewport.
+  return createPortal(
+    <div className="builder-overlay" style={overlay} role="dialog" aria-label={`Edit ${spec.name}`}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div style={shell}>
+        <div className="builder-shell" style={shell}>
           {/* Header */}
           <div style={header}>
             <div style={{ minWidth: 0, flex: 1 }}>
@@ -161,7 +172,7 @@ export default function RecipeBuilder({ specId, onClose }: Props) {
             <button onClick={onClose} style={doneBtn}>Done</button>
           </div>
 
-          <div style={body}>
+          <div className="builder-body" style={body}>
             <PaletteRail
               ingredients={ingredients}
               catalogue={catalogueIngredients}
@@ -210,10 +221,11 @@ export default function RecipeBuilder({ specId, onClose }: Props) {
         </div>
 
         <DragOverlay>
-          {dragging ? <div style={ghost}>Drop into the drink</div> : null}
+          {draggingLabel ? <div style={ghost}>{draggingLabel}</div> : null}
         </DragOverlay>
       </DndContext>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -232,7 +244,7 @@ const overlay: React.CSSProperties = {
   position: 'fixed', inset: 0, zIndex: 4000,
   background: 'rgba(8,7,14,.72)',
   backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-  display: 'flex', padding: 20,
+  display: 'flex',
 };
 
 const shell: React.CSSProperties = {
@@ -245,7 +257,7 @@ const shell: React.CSSProperties = {
 };
 
 const header: React.CSSProperties = {
-  display: 'flex', alignItems: 'flex-start', gap: 16,
+  display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap',
   padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,.08)', flexShrink: 0,
 };
 

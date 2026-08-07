@@ -448,3 +448,19 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .blk, .blk-chip { transition: none !important; }
 }
+
+/* Builder layout: side-by-side on a desk, stacked on a tablet held upright. */
+.builder-overlay { padding: 20px; }
+.builder-body { display: flex; flex: 1; min-height: 0; }
+
+@media (max-width: 900px) {
+  .builder-overlay { padding: 0; }
+  .builder-shell { border-radius: 0; }
+  .builder-body { flex-direction: column; }
+  .builder-rail {
+    width: 100% !important;
+    max-height: 38vh;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(255,255,255,.09);
+  }
+}
