@@ -82,14 +82,14 @@ desktop and tablet, and the fallback menu offers every radial action.
 - [~] Apply 0002 + **0003**. Verify: tables/views live; `published_specs` UPDATE rejected by
       trigger (test it); `get_spec_lineage()` executes as authenticated.
       → migrations 0002–0007 applied and the RPC is in use; **no test proves the immutability trigger rejects an UPDATE**
-- [~] `queries/catalogue.ts` + `CatalogueSearch.tsx`: search shared catalogue; Import creates
+- [x] `queries/catalogue.ts` + `CatalogueSearch.tsx`: search shared catalogue; Import creates
       user's own `ingredients` row (`catalogue_id` set) and **prompts for their price**
       (reference_price is an editable suggestion, never silently used ⚑).
-      → `lib/supabase/catalogue.ts` exists incl. import; **`CatalogueSearch.tsx` does not**
-- [ ] Test asserting `reference_price` never appears in `spec_costs`/`prep_costs` output.
-      → not written
-- [ ] `queries/venues.ts` + minimal venue UI (create/join/leave; no profile pages — deferred).
-      → tables exist from 0002; no code touches them
+      → `CatalogueSearch.tsx` built; reference_price shown as prose, never pre-filled into the price box
+- [x] Test asserting `reference_price` never appears in `spec_costs`/`prep_costs` output.
+      → `referencePrice.test.ts` — behavioural + structural (grep) guard
+- [x] `queries/venues.ts` + minimal venue UI (create/join/leave; no profile pages — deferred).
+      → `lib/supabase/venues.ts` + `VenuePanel.tsx`; last-owner-leaving blocked
 - [ ] Radial centre search now also queries the catalogue.
       → pad search covers own ingredients + preps only
 
@@ -117,8 +117,8 @@ venue can be created and joined; immutability trigger proven.
 - [x] Delete guard: block deleting a published spec with existing forks; human message
       ("N bartenders have forked this").
       → handled at schema level: `published_specs.spec_id` is ON DELETE SET NULL and `forked_from_id` is ON DELETE RESTRICT, so forks cannot break. Node delete now warns about *detaching twists*, which was the real gap
-- [ ] `export.ts`: spec → PDF/Excel (flat component list; straightforward).
-      → not built; jspdf + xlsx already installed
+- [x] `export.ts`: spec → PDF/Excel (flat component list; straightforward).
+      → PDF via jsPDF (dynamically imported); **CSV instead of .xlsx** — npm's SheetJS is stuck at 0.18.5 with an unpatched advisory
 
 **Done when:** with two test accounts — publish, find via search, fork, edit the fork —
 ancestry stays complete via the RPC and attribution survives every step.
@@ -135,8 +135,8 @@ ancestry stays complete via the RPC and attribution survives every step.
       → pad + node contrast measured and fixed; reduced-motion/-transparency CSS written but never viewed with those settings on
 - [ ] Touch pass at 768/1024px: 44px targets, long-press radial, pinch/pan intact.
 - [ ] Perf pass: 60fps drag at 100+ nodes, no full-array rebuild on select, debounced writes.
-- [ ] Ingestion on-ramp (`ingestion.ts`): paste a recipe → draft spec (v1 scope; no AI beyond).
-      → not built; the pad's Ingest action is disabled waiting on it
+- [x] Ingestion on-ramp (`ingestion.ts`): paste a recipe → draft spec (v1 scope; no AI beyond).
+      → deterministic parser, no AI; pad's Ingest action now enabled
 - [~] `npm run build` clean; smoke-test production on Vercel.
       → `vite build` is clean; not smoke-tested on Vercel
 

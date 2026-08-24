@@ -3,7 +3,7 @@
 Read `VISION.md` for what and why, `PLAN.md` for the phase breakdown, `CLAUDE.md` for the rules.
 This file is the honest snapshot: what just changed, and what is genuinely left.
 
-**Last updated:** 2026-08-24 · branch `feat/iba-commons-seed` · [PR #1](https://github.com/leonardostokes24/Cocktail-Playground-main/pull/1)
+**Last updated:** 2026-08-24 (second pass) · branch `feat/iba-commons-seed` · [PR #1](https://github.com/leonardostokes24/Cocktail-Playground-main/pull/1)
 
 ---
 
@@ -72,47 +72,69 @@ going too.
 
 ## What's left
 
-> ⚠️ **`PLAN.md` is out of date.** All 39 of its checkboxes are unticked, including work that is
-> clearly finished (the radial menu, the migrations, publish, fork, the lineage RPC). Trust the
-> list below over the checkboxes until someone reconciles the two.
+`PLAN.md` has now been reconciled against the code — **26 done, 7 partial, 5 open, 1 blocked**.
+Every partial or open task carries a `→` line saying exactly what is missing.
 
-### Actually missing — not built at all
+### Built this pass
 
-| Thing | Where it belongs | Notes |
-|---|---|---|
-| **Export to PDF / Excel** | `src/utils/export.ts` | File doesn't exist. `jspdf` and `xlsx` are already installed. |
-| **Recipe ingestion** | `src/utils/ingestion.ts` | File doesn't exist. This is what the pad's greyed-out *Ingest* action is waiting for. |
-| **Catalogue search UI** | `CatalogueSearch.tsx` | The queries exist (`lib/supabase/catalogue.ts`); the surface to use them doesn't. |
-| **Venues** | `queries/venues.ts` + minimal UI | Tables exist from migration 0002; no code touches them. |
+| Thing | Where |
+|---|---|
+| **Export to PDF and CSV** | `src/utils/export.ts`, buttons in the spec panel |
+| **Paste-a-recipe ingestion** | `src/utils/ingestion.ts` + `IngestPanel.tsx` — the pad's *Ingest* action is live |
+| **Catalogue browse + import** | `CatalogueSearch.tsx`, reachable from the Cost Library |
+| **Venues** | `lib/supabase/venues.ts` + `VenuePanel.tsx` — create / join / leave |
+
+Two deliberate deviations, both flagged rather than silent:
+
+- **CSV, not `.xlsx`.** CLAUDE.md's stack line says xlsx, but npm's copy of SheetJS stops at
+  0.18.5 with an unpatched prototype-pollution advisory — the project moved distribution off
+  npm. CSV needs no dependency and opens directly in Excel. Cells beginning `=`, `+`, `-` or `@`
+  are escaped so an ingredient name can't execute as a formula.
+- **Ingestion uses no AI.** CLAUDE.md permits it *for* ingestion but doesn't require it. A
+  recipe line is a quantity, a unit and a name — a parser handles that exactly, offline, with
+  no key and no latency, and reports the lines it couldn't read instead of guessing.
+
+### Still open
+
+- **Unpublish** — flips `specs.visibility` only, with copy explaining the snapshot persists for
+  forks. Not built.
+- **Fork vs branch edges** are not styled differently; edges are still built from
+  `parent_spec_id` alone.
+- **Recents-first** in the pad's search was never implemented.
+- **The pad's search doesn't query the catalogue** — own ingredients and preps only.
+- **No test proves the `published_specs` immutability trigger rejects an UPDATE.**
 
 ### Built but unproven
 
-These are written and appear to work, but nothing has confirmed them:
-
-- **Touch long-press on a real device.** Everything so far was mouse or simulated. The 300ms
-  press-and-hold on a real finger has never run. Needs a tablet or BrowserStack at 768px.
-- **60fps with 100+ nodes.** The CLAUDE.md benchmark gate. Never measured.
-- **The two-account round trip** — publish, find by search, fork, edit the fork, and confirm the
-  ancestry and credit survive every step. This is Phase 4's own definition of done.
-- **Reduced-motion and reduced-transparency** rendering. The CSS is written; nobody's looked at
-  it with those settings on.
+- **Touch long-press on a real device.** Everything so far was mouse or simulated pointer
+  events. Needs a tablet or BrowserStack at 768px.
+- **60fps with 100+ nodes** — the CLAUDE.md benchmark gate, never measured.
+- **The two-account round trip** — publish, search, fork, edit, and confirm ancestry and credit
+  survive. This is Phase 4's own definition of done.
+- **Reduced-motion / reduced-transparency** rendering.
+- **Vercel smoke test** — `vite build` is clean locally; the deployed build hasn't been checked.
 
 ### Smaller open questions
 
-- **The dimming behind the pad** is set fairly light, so canvas text stays faintly readable
-  through it. Easy to push darker if it reads as muddy.
-- **Twist numbers renumber on delete** (see above) — fine if they mean "the Nth twist right
-  now", wrong if a twist should keep its number permanently.
-- **PR #1 is large** — 60 files, ~9.4k added. The three most recent commits are individually
-  bisectable if a commit-by-commit read is easier.
+- **The dimming behind the pad** is light, so canvas text stays faintly readable through it.
+- **Twist numbers renumber on delete** — fine if they mean "the Nth twist right now", wrong if a
+  twist should keep its number permanently. The latter needs a stored column.
+- **Ingested ingredients get 0% ABV.** A paste can't tell us strength, and unlike cost there's
+  no "unknown" badge for ABV — the node just shows a low number until you set it. The ingest
+  panel says so, but a proper unknown-ABV state would be better.
 
 ---
 
 ## Current state of the checks
 
-`typecheck` 0 errors · **87 tests green** · `vite build` clean.
+`typecheck` 0 errors · **118 tests green** · `vite build` clean.
 
 Driven by hand in the running app: the pad opens and commits by click, keyboard, numpad, and
 press-drag-release; adding an ingredient works from menu to finished recipe line; twists number
 correctly; the delete warning counts detaching twists correctly. Text contrast was measured on
 every state of the pad, which caught two failures that were then fixed.
+
+Second pass, also driven by hand: pasting a recipe reads the amounts, method, glass and garnish,
+flags the line it can't parse, and creates the spec; the catalogue import shows the community
+price as prose and leaves the price box empty, so importing without typing a price yields an
+unpriced ingredient rather than someone else's cost; the venue panel opens with its three tabs.
