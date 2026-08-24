@@ -54,7 +54,7 @@ const wrap: React.CSSProperties = {
   borderRadius: 12,
   background: 'rgba(255,255,255,.05)',
   border: '1px solid rgba(255,255,255,.13)',
-  borderLeft: '3px solid rgba(127,230,255,.4)', // containers are marked by an edge, not a hue
+  borderLeft: '3px solid var(--ink)', // containers are marked by an edge, not a hue
   padding: 10,
 };
 

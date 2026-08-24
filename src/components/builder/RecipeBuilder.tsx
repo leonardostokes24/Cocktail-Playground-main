@@ -242,8 +242,7 @@ function Readout({ label, value, muted }: { label: string; value: string; muted?
 
 const overlay: React.CSSProperties = {
   position: 'fixed', inset: 0, zIndex: 4000,
-  background: 'rgba(8,7,14,.72)',
-  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+  background: 'rgba(8,7,14,.72)', WebkitBackdropFilter: 'blur(10px)',
   display: 'flex',
 };
 
@@ -296,6 +295,6 @@ const stack: React.CSSProperties = {
 
 const ghost: React.CSSProperties = {
   fontFamily: 'var(--font-ui)', fontSize: 12, color: 'var(--text)',
-  background: 'rgba(127,230,255,.18)', border: '1px solid rgba(127,230,255,.4)',
+  background: 'rgba(127,230,255,.18)', border: '1px solid var(--ink)',
   borderRadius: 8, padding: '10px 14px', pointerEvents: 'none',
 };

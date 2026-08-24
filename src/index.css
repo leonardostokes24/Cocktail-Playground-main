@@ -51,236 +51,108 @@
   --ring: oklch(0.66 0.17 162 / 0.5);
 }
 
-/* ── Proof chroma-glass design system (source: design_handoff_proof/tokens.css) ── */
+/* ── Proof paper design system — from Claude Design "Proof New UI" 8a ──────────
+   Replaces the chroma-glass system. Flat paper, ink and one crimson accent; no
+   blur, no gradient, no radius. Structure is carried by hairline rules and a
+   mono index, not by depth. */
 :root {
-  /* Ground */
-  --ground: #0C0B14;
-  --bg: #0C0B14; /* alias — keep for existing code */
+  /* Ground and surfaces */
+  --paper:        #eae7de;   /* canvas ground */
+  --card:         #f2f0ea;   /* every raised surface — nodes, panels, bars */
+  --ink:          #1a1a17;   /* text, borders, the inverted header fill */
+  --ink-72:       rgba(26,26,23,.72);
+  --ink-45:       rgba(26,26,23,.45);
+  --rule:         rgba(26,26,23,.16);   /* hairline inside a surface */
+  --rule-strong:  rgba(26,26,23,.30);   /* surface outline */
+  --rule-faint:   rgba(26,26,23,.12);   /* cell divider */
+  --accent:       #c22a06;   /* forks, destructive, the one live colour */
+  --accent-line:  rgba(194,42,6,.45);
+  --on-ink:       #f2f0ea;   /* text on an inked header */
 
-  /* Light blooms — behind glass, so it has something to refract */
-  --bloom-indigo: #3a3380;
-  --bloom-teal:   #1d5f72;
-  --bloom-plum:   #5a2a66;
-  --bloom-alpha:  0.45;
-  --bloom-blur:   30px;
+  /* Aliases kept so existing components don't all have to change at once. */
+  --ground:       #eae7de;
+  --bg:           #eae7de;
+  --text:         #1a1a17;
+  --text-2:       rgba(26,26,23,.72);
+  --text-muted:   rgba(26,26,23,.45);
+  --ink-alias:    #1a1a17;
+  --mute:         rgba(26,26,23,.45);
+  --cyan:         #c22a06;
+  --magenta:      #c22a06;
+  --glass-border: rgba(26,26,23,.30);
 
-  /* Glass material */
-  --glass-fill:     linear-gradient(168deg, rgba(255,255,255,.085), rgba(255,255,255,.025));
-  --glass-border:   rgba(255,255,255,.14);
-  --glass-blur:     blur(24px) saturate(135%);
-  --glass-toplight: rgba(255,255,255,.22);
-  --glass-shadow:   0 26px 52px -22px rgba(0,0,0,.8);
+  /* Structure: nothing is rounded, depth is a hard offset shadow. */
+  --r-node: 0px;
+  --r-bar:  0px;
+  --r-chip: 0px;
+  --lift:   3px 3px 0 rgba(26,26,23,.18);
+  --lift-lg: 6px 8px 0 rgba(26,26,23,.16);
 
-  /* Edge dispersion — cyan left, magenta right */
-  --edge-cyan:    rgba(120,225,255,.42);
-  --edge-mag:     rgba(255,135,210,.36);
-  --edge-top:     rgba(255,255,255,.22); /* alias */
-  --edge-magenta: rgba(255,135,210,.36); /* alias for existing code */
+  /* Canvas dot grid */
+  --dot: rgba(26,26,23,.14);
 
-  /* Calmer panel surface */
-  --panel-fill:      linear-gradient(168deg, rgba(22,20,34,.86), rgba(16,15,26,.82));
-  --panel-edge-cyan: rgba(120,225,255,.30);
-  --panel-edge-mag:  rgba(255,135,210,.26);
-
-  /* Accents */
-  --cyan:         #7FE6FF;
-  --cyan-text:    #bfeeff;
-  --magenta:      #ff87d2;
-  --magenta-text: #ffd6f0;
-
-  /* Text */
-  --text:        #f4f2fb;
-  --text-2:      rgba(230,228,245,.55);
-  --text-muted:  rgba(230,228,245,.40);
-  --ink:  #EEF0FA; /* alias */
-  --mute: #9296B4; /* alias */
-
-  /* Ingredient type dots */
-  --type-spirit:    #e0b64a;
-  --type-modifier:  #c86ab0;
-  --type-citrus:    #facc15;
-  --type-sweetener: #60a5fa;
-  --type-bitters:   #d24a3a;
-
-  /* Display aberration (sub-pixel fringe; felt, not seen) */
-  --fringe-cyan: -.4px 0 rgba(120,225,255,.42);
-  --fringe-mag:   .4px 0 rgba(255,135,210,.36);
-  --aberration:  -.4px 0 rgba(120,225,255,.42), .4px 0 rgba(255,135,210,.36); /* alias */
-
-  /* Gauge */
-  --gauge-track: rgba(255,255,255,.09);
-
-  /* Radii */
-  --r-node: 18px;
-  --r-bar:  15px;
-  --r-chip: 12px;
-
-  /* Typography */
-  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
-  --font-ui:      "Inter Tight", system-ui, sans-serif;
+  /* Type — a serif carries the drink names, mono carries every number. */
+  --font-display: "Newsreader", Georgia, serif;
+  --font-ui:      "Newsreader", Georgia, serif;
   --font-mono:    "JetBrains Mono", ui-monospace, monospace;
 }
 
-/* ── Glass surface utilities ─────────────────────────────────────────────── */
+/* ── Paper surfaces ───────────────────────────────────────────────────────────
+   Class names are kept from the glass system so components could migrate one at
+   a time; what they render is now flat card stock with a hairline outline. */
 .glass {
-  background: var(--glass-fill);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--r-node);
-  box-shadow:
-    inset 0 1px 0 var(--glass-toplight),
-    inset 1.2px 0 0 var(--edge-cyan),
-    inset -1.2px 0 0 var(--edge-mag),
-    var(--glass-shadow);
+  background: var(--card);
+  border: 1px solid var(--rule-strong);
+  border-radius: 0;
+  transition: box-shadow .12s ease, border-color .12s ease;
 }
 
+/* Selection is stated by the node's own inked header strip; the outline just
+   goes full-strength and the card lifts onto a hard offset shadow. */
 .glass--selected {
-  border-color: rgba(127,230,255,.5);
-  box-shadow:
-    inset 0 1px 0 var(--glass-toplight),
-    inset 1.2px 0 0 var(--edge-cyan),
-    inset -1.2px 0 0 var(--edge-mag),
-    0 0 0 1.5px rgba(127,230,255,.35),
-    var(--glass-shadow);
+  border-color: var(--ink);
+  box-shadow: var(--lift);
 }
 
-/* Calmer panel — editing through less frost */
 .glass-panel {
-  background: var(--panel-fill);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 20px;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.16),
-    inset 1px 0 0 var(--panel-edge-cyan),
-    inset -1px 0 0 var(--panel-edge-mag),
-    0 30px 60px -24px rgba(0,0,0,.85);
+  background: var(--card);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--lift-lg);
 }
 
-/* ── Display type (Bricolage + aberration) ───────────────────────────────── */
+/* Depth is a hard offset, never a blur — and never a transform, which would
+   fight React Flow's positioning on a node. */
+.glass-hover-lift:hover {
+  box-shadow: var(--lift);
+}
+
+/* ── Display type ─────────────────────────────────────────────────────────── */
 .display {
   font-family: var(--font-display);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text);
-  text-shadow: var(--fringe-cyan), var(--fringe-mag);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--ink);
 }
 
-/* ── GP conic gauge ──────────────────────────────────────────────────────── */
-.gp-gauge {
-  --gp: 0;
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  background: conic-gradient(
-    var(--cyan) 0 calc(var(--gp) * 1%),
-    var(--gauge-track) calc(var(--gp) * 1%) 100%
-  );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.gp-gauge__inner {
-  width: 39px;
-  height: 39px;
-  border-radius: 50%;
-  background: rgba(12,11,20,.9);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.gp-gauge__num {
-  font: 600 13px/1 var(--font-mono);
-  color: #fff;
-}
-
-.gp-gauge__unit {
-  font: 500 6.5px var(--font-mono);
-  color: var(--cyan);
-  letter-spacing: .08em;
-  margin-top: 1px;
-}
-
-/* ── Mono readout: <span class="readout"><b>28</b><i>% ABV</i></span> ────── */
+/* ── Mono readout ─────────────────────────────────────────────────────────── */
 .readout b {
-  font: 600 15px var(--font-mono);
-  color: var(--text);
+  font: 400 15px var(--font-mono);
+  color: var(--ink);
   font-style: normal;
 }
 
 .readout i {
-  font: 500 10px var(--font-mono);
-  color: var(--cyan);
+  font: 400 10px var(--font-mono);
+  color: var(--ink-72);
   font-style: normal;
 }
 
-/* ── Bloom backgrounds ───────────────────────────────────────────────────── */
-.bloom {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-  filter: blur(30px);
-}
-
-.bloom-indigo {
-  background: radial-gradient(circle, rgba(58,51,128,.55), transparent 68%);
-}
-
-.bloom-teal {
-  background: radial-gradient(circle, rgba(29,95,114,.5), transparent 68%);
-}
-
-.bloom-plum {
-  background: radial-gradient(circle, rgba(90,42,102,.5), transparent 68%);
-}
-
-/* ── Sheen / motion ──────────────────────────────────────────────────────── */
-@keyframes glassSheen {
-  0%, 100% { background-position: 0% 50%; }
-  50%       { background-position: 100% 50%; }
-}
-
-.glass-sheen {
-  background-size: 240% 240%;
-  animation: glassSheen 9s ease-in-out infinite;
-}
-
-.glass-hover-lift {
-  transition: transform 0.4s cubic-bezier(.2,.7,.2,1);
-}
-
-.glass-hover-lift:hover {
-  transform: translateY(-4px);
-}
+/* The bloom layer belonged to the dark ground and has no place on paper. */
+.bloom { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .glass-sheen      { animation: none; }
-  .glass-hover-lift:hover { transform: none; }
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
-}
-
-/* ⚑ Solid fallbacks where backdrop-filter isn't supported. Without these the
-   glass surfaces fall back to a near-transparent fill and their text lands on
-   whatever is behind them, which fails contrast outright. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass            { background: rgba(24,22,38,.97); }
-  .glass-panel      { background: rgba(18,16,32,.98); }
-  .spec-node__delete { background: rgba(28,24,44,.99); }
-  .cmd-pad::before  { background: rgba(6,5,12,.97); }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .glass, .glass-panel {
-    background: rgba(18,16,32,.95);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
 }
 
 /* ── Global reset ────────────────────────────────────────────────────────── */
@@ -531,11 +403,9 @@ body {
   min-width: 24px;
   height: 24px;
   padding: 0 6px;
-  border: 1px solid rgba(255,255,255,.16);
-  border-radius: 999px;
-  background: rgba(28,24,44,.92);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  border: 1px solid var(--rule-strong);
+  border-radius: 0;
+  background: var(--card);
   color: var(--text-2);
   cursor: pointer;
   opacity: 0;
@@ -626,16 +496,12 @@ body {
 /* ── Dialog / shadcn overrides ───────────────────────────────────────────── */
 [data-slot="dialog-content"] {
   background: rgba(16,14,28,.92) !important;
-  backdrop-filter: blur(32px) saturate(160%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(160%) !important;
   border: 1px solid rgba(255,255,255,.12) !important;
   box-shadow: 0 24px 64px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.10) !important;
 }
 
 [data-slot="dialog-overlay"] {
   background: rgba(0,0,0,.5) !important;
-  backdrop-filter: blur(6px) !important;
-  -webkit-backdrop-filter: blur(6px) !important;
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */

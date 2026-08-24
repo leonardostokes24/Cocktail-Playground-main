@@ -284,8 +284,7 @@ function PrepCard(props: CardProps) {
 
 const panel: React.CSSProperties = {
   position: 'fixed', top: 0, right: 0, bottom: 0, width: 620,
-  background: 'var(--panel-fill)',
-  backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+  background: 'var(--panel-fill)', WebkitBackdropFilter: 'var(--glass-blur)',
   borderLeft: '1px solid rgba(255,255,255,.12)',
   boxShadow: 'inset 1px 0 0 rgba(120,225,255,.22), -14px 0 48px rgba(0,0,0,.65)',
   zIndex: 3000, display: 'flex', flexDirection: 'column',

@@ -170,8 +170,6 @@ const menuStyle: React.CSSProperties = {
   zIndex: 2001,
   minWidth: 192,
   background: 'linear-gradient(168deg, rgba(18,22,40,0.97), rgba(12,15,28,0.98))',
-  backdropFilter: 'blur(24px) saturate(135%)',
-  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
   border: '1px solid rgba(255,255,255,0.12)',
   boxShadow:
     'inset 1px 0 0 rgba(120,225,255,.28), inset -1px 0 0 rgba(255,135,210,.22), inset 0 1px 0 rgba(255,255,255,.18), 0 16px 48px rgba(0,0,0,.7)',

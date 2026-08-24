@@ -170,7 +170,7 @@ const roleTag: React.CSSProperties = {
 const cityTag: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-muted)' };
 const joinBtn: React.CSSProperties = {
   padding: '4px 10px', borderRadius: 6, background: 'rgba(127,230,255,.14)',
-  border: '1px solid rgba(127,230,255,.34)', color: '#eaf9ff',
+  border: '1px solid var(--rule-strong)', color: 'var(--on-ink)',
   fontFamily: 'var(--font-ui)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
 };
 const leaveBtn: React.CSSProperties = {
@@ -189,8 +189,8 @@ const muted: React.CSSProperties = {
 const errorLine: React.CSSProperties = { margin: 0, fontFamily: 'var(--font-ui)', fontSize: 12, color: '#ff9d9d' };
 const primaryBtn = (disabled: boolean): React.CSSProperties => ({
   padding: '9px 15px', borderRadius: 8,
-  background: disabled ? 'rgba(255,255,255,.05)' : 'linear-gradient(168deg, rgba(127,230,255,.26), rgba(127,230,255,.13))',
-  border: `1px solid ${disabled ? 'rgba(255,255,255,.1)' : 'rgba(127,230,255,.4)'}`,
-  color: disabled ? 'var(--text-muted)' : '#eaf9ff',
+  background: disabled ? 'rgba(255,255,255,.05)' : 'var(--ink)',
+  border: `1px solid ${disabled ? 'rgba(255,255,255,.1)' : 'var(--ink)'}`,
+  color: disabled ? 'var(--text-muted)' : 'var(--on-ink)',
   fontFamily: 'var(--font-ui)', fontSize: 12.5, fontWeight: 600, cursor: disabled ? 'default' : 'pointer',
 });

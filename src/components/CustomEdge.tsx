@@ -1,11 +1,9 @@
 import React from 'react';
 import {
   EdgeLabelRenderer,
-  getBezierPath,
+  getSmoothStepPath,
   type EdgeProps,
 } from '@xyflow/react';
-
-const GRAD_ID = 'proof-edge-grad';
 
 /**
  * Two lineages, drawn differently on purpose (⚑ CLAUDE.md):
@@ -26,28 +24,22 @@ export default function GradientEdge({
   data,
 }: EdgeProps) {
   const isFork = (data as { kind?: string } | undefined)?.kind === 'fork';
-  const [edgePath, labelX, labelY] = getBezierPath({
+  // Orthogonal step routing with borderRadius 0 — the design draws lineage as
+  // hard right angles, not curves, so the graph reads like a diagram.
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX, sourceY, sourcePosition,
     targetX, targetY, targetPosition,
+    borderRadius: 0,
   });
 
   return (
     <>
-      {/* SVG defs injected once — React deduplicates by id */}
-      <defs>
-        <linearGradient id={GRAD_ID} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#7FE6FF" stopOpacity=".55" />
-          <stop offset="1" stopColor="#ff87d2" stopOpacity=".5" />
-        </linearGradient>
-      </defs>
-
       <path
         id={id}
         d={edgePath}
-        stroke={isFork ? 'rgba(255,135,210,.6)' : `url(#${GRAD_ID})`}
-        strokeWidth={isFork ? 1.4 : 1.6}
-        strokeDasharray={isFork ? '5 4' : undefined}
-        strokeLinecap={isFork ? 'round' : undefined}
+        stroke={isFork ? 'var(--accent)' : 'rgba(26,26,23,.42)'}
+        strokeWidth={1}
+        strokeDasharray={isFork ? '3 4' : undefined}
         fill="none"
       />
 
@@ -59,14 +51,14 @@ export default function GradientEdge({
               position: 'absolute',
               transform: `translate(-50%, -100%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: 'none',
-              fontFamily: 'var(--font-ui)',
-              fontSize: 10,
-              fontWeight: 600,
-              color: isFork ? '#ffd6f0' : 'var(--text-2)',
-              background: 'rgba(12,11,20,.85)',
-              border: `1px solid ${isFork ? 'rgba(255,135,210,.3)' : 'rgba(255,255,255,.08)'}`,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9.5,
+              fontWeight: 400,
+              color: isFork ? 'var(--accent)' : 'var(--ink-72)',
+              background: 'var(--card)',
+              border: `1px solid ${isFork ? 'var(--accent-line)' : 'var(--rule)'}`,
               padding: '2px 7px',
-              borderRadius: 4,
+              borderRadius: 0,
               whiteSpace: 'nowrap',
               marginBottom: 6,
             }}

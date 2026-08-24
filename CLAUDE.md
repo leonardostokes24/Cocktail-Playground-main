@@ -143,31 +143,41 @@ Radial menus are measurably faster with practice but **harder to learn** — des
 
 ---
 
-## Visual identity — glass with a chromatic whisper ⚑
-`backdrop-filter` is GPU-expensive; translucency is a WCAG risk. Hard rules from research:
-- **Glass only on small floating surfaces** — SpecNode cards, radial, panel chrome. Never
-  full-screen, never behind body text. Blur ≤ 24px, few layers.
-- **Never animate `backdrop-filter`.** Sheen is a background-position sweep on the card only.
-- Solid fallbacks (`@supports not (backdrop-filter: blur(1px))`), respect
-  `prefers-reduced-transparency` (solid surfaces) and `prefers-reduced-motion` (no sheen/lift).
-- **Text on glass must pass WCAG AA** — verify node text against the darkest and lightest bloom.
+## Visual identity — paper, ink, one crimson ⚑
+Source: Claude Design project "Proof New UI", artboard **8a**. This replaced the
+chroma-glass system wholesale — if you find `backdrop-filter`, a gradient fill or a
+border-radius on a surface, it is a leftover, not the style.
+
+- **Flat card stock, never glass.** No blur anywhere. Depth is a hard offset shadow
+  (`--lift`, `3px 3px 0`) and nothing else.
+- **Zero radius on every surface.** Nodes, panels, bars, buttons.
+- **Structure comes from hairline rules and a mono index**, not from depth or colour.
+  A node's header strip carries its lineage number and its role (`01 root`,
+  `02 selected`, `03 fork`) — that numbering encodes real position, so it stays.
+- **One live colour.** Crimson `--accent` marks forks, publishing and destruction.
+  Nothing else is coloured. Selection is stated by inverting a header to ink.
+- **Type does the work.** Newsreader carries drink names and every label; JetBrains
+  Mono carries every number, index and hint. No third face.
+- **Text on paper must still pass WCAG AA** — check against `--card`, not `--paper`.
 
 ```css
 :root {
-  --bg:#0C0B14;
-  --bloom-indigo:rgba(58,51,128,.30); --bloom-teal:rgba(29,95,114,.28); --bloom-plum:rgba(90,42,102,.22);
-  --glass-fill:linear-gradient(168deg,rgba(255,255,255,.085),rgba(255,255,255,.025));
-  --glass-border:rgba(255,255,255,.14); --glass-blur:blur(24px) saturate(135%);
-  --edge-cyan:rgba(120,225,255,.42); --edge-magenta:rgba(255,135,210,.36); --edge-top:rgba(255,255,255,.22);
-  --aberration:-.4px 0 rgba(120,225,255,.42),.4px 0 rgba(255,135,210,.36);
-  --cyan:#7FE6FF; --ink:#EEF0FA; --mute:#9296B4;
+  --paper:#eae7de; --card:#f2f0ea; --ink:#1a1a17;
+  --ink-72:rgba(26,26,23,.72); --ink-45:rgba(26,26,23,.45);
+  --rule:rgba(26,26,23,.16); --rule-strong:rgba(26,26,23,.30); --rule-faint:rgba(26,26,23,.12);
+  --accent:#c22a06; --on-ink:#f2f0ea;
+  --lift:3px 3px 0 rgba(26,26,23,.18); --lift-lg:6px 8px 0 rgba(26,26,23,.16);
+  --font-display:"Newsreader",Georgia,serif; --font-mono:"JetBrains Mono",ui-monospace,monospace;
 }
 ```
-Edge dispersion is **the only chroma**: `inset 1px 0 0 var(--edge-cyan), inset -1px 0 0
-var(--edge-magenta), inset 0 1px 0 var(--edge-top)` — encapsulated once in `Glass.tsx`.
-Aberration text-shadow on display type only. Type: Bricolage Grotesque 700 (display), Inter
-Tight (UI), JetBrains Mono (gauges/amounts). Calm hierarchy: node > panel (more opaque, no
-sheen) > radial > flat chrome. Hover lift `translateY(-4px)` .4s cubic-bezier(.2,.7,.2,1).
+
+**Lineage runs top to bottom.** Handles are Top (target) / Bottom (source); edges are
+orthogonal step routing with `borderRadius: 0`, solid ink for a same-user branch and
+dashed crimson for a cross-user fork. Placement is `utils/layout.ts` — never inline.
+
+**The menu is tethered, not summoned.** One panel, always on screen, acting on whatever
+is selected; it never covers its own target and flips side rather than overlapping.
+Clicking a node selects it — it does **not** open the spec panel. "Open recipe" does.
 
 ## Touch & tablet
 Equal first-class target. 44×44px minimum tap targets; test at 768/1024px; React Flow's
@@ -193,7 +203,7 @@ built-in pinch/pan untouched; no hover-dependent UI.
 | Put `reference_price` in a cost formula | User's own pack_cost is always the source |
 | Hard-code VAT, GP targets, or any formula in a component | Settings + registry only ⚑ |
 | Subscribe components to the whole nodes array | Re-render storm ⚑ |
-| Animate backdrop-filter / glass full-screen | GPU + WCAG ⚑ |
+| Reintroduce glass, gradients or border-radius on a surface | Superseded by the paper system ⚑ |
 | `alert()` / `prompt()` / `confirm()` | Anti-clunk |
 | Add node types, nest preps, build deferred social UI, add AI beyond ingestion | Scope |
 
@@ -204,5 +214,5 @@ built-in pinch/pan untouched; no hover-dependent UI.
 - [ ] `grep -rn "alert(\|prompt(\|confirm(" src/` → zero hits
 - [ ] Long-press radial verified on a real tablet/BrowserStack at 768px
 - [ ] Publish → visible in feed → forkable; fork ancestry traceable to root via RPC
-- [ ] AA contrast on glass; reduced-transparency + reduced-motion honoured
+- [ ] AA contrast on paper (check against `--card`); reduced-motion honoured
 - [ ] `typecheck` 0 · `test` green

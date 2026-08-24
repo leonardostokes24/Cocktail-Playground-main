@@ -7,7 +7,6 @@ import { twistNumbers } from '../../utils/twistNumbers';
 import { childCounts } from '../../utils/childCounts';
 import Glass from '../common/Glass';
 import { clampLines } from '../common/clampLines';
-import { typeDot } from '../common/typeDot';
 
 export type SpecNodeData = {
   onLongPress?: (nodeId: string, pos: { x: number; y: number }) => void;
@@ -17,10 +16,9 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
   const spec             = useProofStore(s => s.specs.find(sp => sp.id === id));
   const components       = useProofStore(s => s.specComponentsMap[id]);
   const dilutionOverrides = useProofStore(s => s.dilutionOverrides);
-  const vatRate          = useProofStore(s => s.vatRate);
   const sundriesPerServe = useProofStore(s => s.sundriesPerServe);
   const wasteRate        = useProofStore(s => s.wasteRate);
-  const activeFormulaId  = useProofStore(s => s.activeFormulaId);
+  const vatRate          = useProofStore(s => s.vatRate);
   const targetGpPct      = useProofStore(s => s.targetGpPct);
   const removeSpec       = useProofStore(s => s.removeSpec);
   // Numbers, so this node only re-renders when its own values move.
@@ -28,6 +26,13 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
   const childCount       = useProofStore(s => childCounts(s.specs)[id] ?? 0);
   // Name of the published snapshot this was forked from, or null. A string, so
   // the node re-renders only when its own source name changes.
+  // Position of this spec in the whole canvas, so the header can carry an index
+  // the way the design's "01 / 02" strip does. Ordered by creation, stable.
+  const specIndex        = useProofStore(s => {
+    const ordered = [...s.specs].sort((a, b) =>
+      a.created_at === b.created_at ? a.id.localeCompare(b.id) : a.created_at.localeCompare(b.created_at));
+    return ordered.findIndex(sp => sp.id === id) + 1;
+  });
   const forkSourceName   = useProofStore(s => {
     const fid = s.specs.find(sp => sp.id === id)?.forked_from_published_id;
     return fid ? (s.forkSources[fid]?.name ?? null) : null;
@@ -100,20 +105,13 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
   // the one thing it definitively is not.
   const isFork = !!spec.forked_from_published_id;
   const isRoot = !spec.parent_spec_id && !isFork;
-  const isPublished = spec.status === 'published';
 
   const costs = components
     ? computeSpecCosts(spec.method, spec.sale_price, components, dilutionOverrides, { sundriesPerServe, wasteRate })
     : null;
 
-  // Headline metric via active formula
-  const activeFormula = getFormula(activeFormulaId);
-  const activeSecondArg = formulaSecondArg(activeFormula, spec.sale_price, targetGpPct);
-  const headline = costs && activeSecondArg != null
-    ? activeFormula.compute(costs.modifiedCost, activeSecondArg, vatRate)
-    : null;
 
-  // GP% always for the conic ring
+  // GP drives the first footer cell.
   const gpFormula = getFormula('gp_ex_vat');
   const gpSecondArg = formulaSecondArg(gpFormula, spec.sale_price, targetGpPct);
   const gpPct = costs && gpSecondArg != null
@@ -128,26 +126,30 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
     : `Delete ${spec.name}?`;
 
   // Descriptor line — how the drink is made (the recipe body carries what's in it).
+  const role = isFork ? 'fork' : isRoot ? 'root' : twistNo ? `twist ${twistNo}` : 'twist';
   const twistLabel = twistNo ? `Twist ${twistNo}` : 'Twist';
+  // Three mono cells: gp, abv, volume. Unpriced says so rather than showing 0,
+  // which would read as free.
+  const footerCells = costs
+    ? [
+        { label: 'gp',  value: costs.fullyPriced ? `${Math.round(gpPct)}% gp` : 'unpriced',
+          accent: costs.fullyPriced && gpPct < targetGpPct },
+        { label: 'abv', value: `${costs.finalAbvPct.toFixed(0)}%` },
+        { label: 'vol', value: `${Math.round(costs.finalVolumeMl)}ml` },
+      ]
+    : [{ label: 'gp', value: 'no data', accent: false }];
+
   const descriptor = isFork
     ? (forkSourceName ? `Forked from ${forkSourceName}` : 'Forked from the commons')
     : isRoot
       ? [spec.method, spec.glass].filter(Boolean).join(' · ')
       : spec.change_note ? `${twistLabel} · ${spec.change_note}` : twistLabel;
 
-  // Metrics collapse to one quiet footer line — pricing is secondary to the recipe.
-  const metrics = costs
-    ? [
-        `${costs.finalAbvPct.toFixed(1)}% ABV`,
-        `${Math.round(costs.finalVolumeMl)}ml`,
-        costs.fullyPriced ? `${Math.round(gpPct)}% GP` : 'unpriced',
-      ].join(' · ')
-    : null;
 
   return (
     <Glass
       selected={selected}
-      style={{ width: 232, padding: '15px 16px', cursor: 'pointer', position: 'relative' }}
+      style={{ width: 244, cursor: 'pointer', position: 'relative' }}
       onTouchStart={onTouchStart}
       onTouchEnd={clearLongPress}
       onTouchMove={clearLongPress}
@@ -180,51 +182,49 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
         )}
       </button>
 
-      {/* Row 1: Name + ROOT badge */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h3 className="display" style={nameStyle} title={spec.name}>{spec.name}</h3>
-          {descriptor && (
-            <p style={descriptorStyle}>{descriptor}</p>
-          )}
-        </div>
-        {isFork ? (
-          <span style={forkBadge}>⑂ FORK</span>
-        ) : isRoot ? (
-          <span style={rootBadge}>◈ ROOT</span>
-        ) : null}
+      {/* Header strip: index + what this node is. Inverts when selected. */}
+      <div style={selected ? headerStripSelected : isFork ? headerStripFork : headerStrip}>
+        <span>{String(specIndex).padStart(2, '0')}</span>
+        <span>{role}</span>
       </div>
 
-      {/* Row 2: the recipe — what's actually in the drink */}
-      <div className="spec-node__recipe" style={recipeBody}>
-        {components?.length ? (
-          components.map((c) => (
+      {/* Name + descriptor */}
+      <div style={{ padding: '12px 12px 0' }}>
+        <h3 className="display" style={nameStyle} title={spec.name}>{spec.name}</h3>
+        {descriptor && <p style={descriptorStyle}>{descriptor}</p>}
+      </div>
+
+      {/* The recipe — only carried by the selected card, as in the design */}
+      {components?.length ? (
+        <div className="spec-node__recipe" style={recipeBody}>
+          {components.map((c) => (
             <div key={c.id} style={recipeRow}>
-              <span style={amountCell}>
-                {c.original_amount ?? c.amount_ml}
-                <i style={unitCell}>&thinsp;{c.original_unit ?? 'ml'}</i>
+              <span style={ingredientName} title={c.ingredients?.name ?? c.preps?.name ?? undefined}>
+                {c.ingredients?.name ?? c.preps?.name ?? '—'}
               </span>
-              <span style={typeDot(c.ingredients?.type, 5)} />
-              <span style={ingredientName} title={c.ingredients?.name ?? undefined}>
-                {c.ingredients?.name ?? '—'}
+              <span style={amountCell}>
+                {c.original_amount ?? c.amount_ml}{c.original_unit ?? 'ml'}
               </span>
             </div>
-          ))
-        ) : (
-          <p style={emptyRecipe}>No ingredients yet</p>
-        )}
+          ))}
+        </div>
+      ) : (
+        <div style={{ padding: '0 12px 12px' }}><p style={emptyRecipe}>No ingredients yet</p></div>
+      )}
+
+      {/* Footer: the numbers, in mono cells divided by hairlines */}
+      <div style={footer}>
+        {footerCells.map((cell, i) => (
+          <span key={cell.label} style={footerCell(i === footerCells.length - 1, cell.accent)}>
+            {cell.value}
+          </span>
+        ))}
       </div>
 
-      {/* Footer: metrics + status */}
-      <div style={footer}>
-        <span style={attribution}>{metrics ?? spec.method ?? 'Spec'}</span>
-        <span style={isPublished ? statusCommons : statusPrivate}>
-          {isPublished
-            ? <><span style={dot} />Commons</>
-            : <><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" style={{ flexShrink: 0 }}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Private</>
-          }
-        </span>
-      </div>
+      {/* Attribution travels with a fork, always */}
+      {isFork && forkSourceName && (
+        <div style={attributionRow}>forked · {forkSourceName}</div>
+      )}
 
       <Handle type="source" position={Position.Bottom} style={handle} />
     </Glass>
@@ -236,159 +236,109 @@ export default memo(SpecNode);
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const handle: React.CSSProperties = {
-  background: 'rgba(127,230,255,.35)',
-  border: '1px solid rgba(127,230,255,.2)',
-  width: 8,
-  height: 8,
+  background: 'var(--ink)',
+  border: 'none',
+  borderRadius: 0,
+  width: 5,
+  height: 5,
+};
+
+/* The mono strip: an index and what this node is. It earns its place — the
+   number is the spec's position in the lineage, the word is its role. */
+const stripBase: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  padding: '7px 12px',
+  font: "400 10px/1 var(--font-mono)",
+  letterSpacing: '.1em',
+  borderBottom: '1px solid var(--rule)',
+};
+
+const headerStrip: React.CSSProperties = { ...stripBase, color: 'var(--ink-72)' };
+
+const headerStripFork: React.CSSProperties = { ...stripBase, color: 'var(--accent)' };
+
+const headerStripSelected: React.CSSProperties = {
+  ...stripBase,
+  background: 'var(--ink)',
+  color: 'var(--on-ink)',
+  borderBottom: '1px solid var(--ink)',
 };
 
 const nameStyle: React.CSSProperties = {
-  fontSize: 21,
-  // 1.12 rather than 1 so the second line's descenders aren't clipped.
-  lineHeight: 1.12,
+  font: '500 22px/1.05 var(--font-display)',
   margin: 0,
+  color: 'var(--ink)',
   ...clampLines(2),
 };
 
 const descriptorStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 10,
-  fontWeight: 500,
-  color: 'var(--text-2)',
+  font: '400 12.5px/1.4 var(--font-display)',
+  color: 'var(--ink-72)',
   margin: '5px 0 0',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 };
 
-const rootBadge: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 8.5,
-  fontWeight: 700,
-  letterSpacing: '0.08em',
-  color: '#8fe0ff',
-  border: '1px solid rgba(127,230,255,.3)',
-  borderRadius: 5,
-  padding: '3px 6px',
-  whiteSpace: 'nowrap',
-  flexShrink: 0,
-  marginLeft: 8,
-};
-
-// Magenta throughout the app means "crossed over from someone else" — the same
-// hue the fork edge uses, so badge and edge read as one idea.
-const forkBadge: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 8.5,
-  fontWeight: 700,
-  letterSpacing: '0.08em',
-  color: '#ffd6f0',
-  border: '1px solid rgba(255,135,210,.34)',
-  borderRadius: 5,
-  padding: '3px 6px',
-  whiteSpace: 'nowrap',
-  flexShrink: 0,
-  marginLeft: 8,
-};
-
 const recipeBody: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 3,
-  marginTop: 12,
-  paddingTop: 11,
-  borderTop: '1px solid rgba(255,255,255,.09)',
+  gap: 4,
+  padding: '11px 12px',
 };
 
 const recipeRow: React.CSSProperties = {
   display: 'flex',
   alignItems: 'baseline',
-  gap: 7,
-};
-
-// Fixed mono gutter — amounts line up into a scannable column across the card.
-const amountCell: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 11,
-  color: 'var(--text-2)',
-  width: 52,
-  textAlign: 'right',
-  flexShrink: 0,
-  whiteSpace: 'nowrap',
-};
-
-const unitCell: React.CSSProperties = {
-  fontStyle: 'normal',
-  fontSize: 9,
-  color: 'var(--text-muted)',
+  justifyContent: 'space-between',
+  gap: 10,
 };
 
 const ingredientName: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 11.5,
-  color: 'var(--text)',
+  font: '400 12.5px/1 var(--font-display)',
+  color: 'var(--ink)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
   minWidth: 0,
 };
 
+const amountCell: React.CSSProperties = {
+  font: '400 10.5px/1 var(--font-mono)',
+  color: 'var(--ink-72)',
+  flexShrink: 0,
+};
+
 const emptyRecipe: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 11,
-  color: 'var(--text-muted)',
+  font: '400 12.5px/1 var(--font-display)',
+  color: 'var(--ink-45)',
   margin: 0,
 };
 
 const footer: React.CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  marginTop: 14,
-  paddingTop: 11,
-  borderTop: '1px solid rgba(255,255,255,.09)',
+  borderTop: '1px solid var(--rule)',
 };
 
-const attribution: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 9.5,
-  color: 'var(--text-muted)',
+const footerCell = (last: boolean, accent?: boolean): React.CSSProperties => ({
+  flex: 1,
+  padding: '8px 12px',
+  font: '400 10.5px/1 var(--font-mono)',
+  color: accent ? 'var(--accent)' : 'var(--ink-72)',
+  borderRight: last ? 'none' : '1px solid var(--rule-faint)',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+});
+
+/* Attribution is data and rides on every fork card, always (⚑). */
+const attributionRow: React.CSSProperties = {
+  padding: '7px 12px',
+  borderTop: '1px solid var(--rule)',
+  font: '400 10.5px/1 var(--font-mono)',
+  color: 'var(--ink-72)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
-  flex: 1,
-};
-
-const dot: React.CSSProperties = {
-  display: 'inline-block',
-  width: 5,
-  height: 5,
-  borderRadius: '50%',
-  background: 'var(--cyan)',
-  boxShadow: '0 0 0 3px rgba(127,230,255,.15)',
-  marginRight: 4,
-};
-
-const statusCommons: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 9,
-  fontWeight: 600,
-  color: '#8fe0ff',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 3,
-  flexShrink: 0,
-  marginLeft: 8,
-};
-
-const statusPrivate: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 9,
-  fontWeight: 600,
-  color: 'var(--text-muted)',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 3,
-  flexShrink: 0,
-  marginLeft: 8,
 };

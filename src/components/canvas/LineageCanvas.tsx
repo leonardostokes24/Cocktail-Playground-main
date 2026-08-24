@@ -21,6 +21,8 @@ import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
 import ContextMenuFallback from '../radial/ContextMenuFallback';
 import { detachedBy } from '../../utils/childCounts';
 import CommonsPanel from './CommonsPanel';
+import SelectionMenu from './SelectionMenu';
+import LineageStats from './LineageStats';
 
 const NODE_TYPES = { specNode: SpecNodeComponent };
 const EDGE_TYPES = { default: GradientEdge };
@@ -65,6 +67,10 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const [showIngest, setShowIngest] = useState(false);
   const [showVenues, setShowVenues] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // Selecting a node and opening its recipe are different things now: the
+  // tethered menu is what a click reveals, and the full panel is one explicit
+  // action away. Nodes stay plain cards (8a).
+  const [panelOpen, setPanelOpen] = useState(false);
   const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
   // The pad is the menu. The list is an explicit fallback the user opts into —
@@ -164,6 +170,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     // Multi-select (⌘/Ctrl or Shift) builds a selection — don't open the panel over it.
     if (evt.metaKey || evt.ctrlKey || evt.shiftKey) return;
     selectSpec(node.id);
+    setPanelOpen(false);
   }, [selectSpec]);
 
   const onNodeDragStop: OnNodeDrag = useCallback((_evt, node) => {
@@ -216,7 +223,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   // Widths mirror each panel's own style; the widest open one reserves space so
   // the dock never sits underneath it.
   const openPanelWidth = Math.max(
-    selectedSpecId ? 560 : 0,          // SpecPanel
+    selectedSpecId && panelOpen ? 560 : 0, // SpecPanel
     showLibrary ? 680 : 0,             // IngredientLibrary
     showPreps ? 620 : 0,               // PrepLibrary
     showSettings ? 420 : 0,            // SettingsPanel
@@ -262,10 +269,9 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [specs, createSpec, selectSpec]);
 
   const handlePanelClose = useCallback(() => {
-    setRfNodes(nds => nds.map(n => n.selected ? { ...n, selected: false } : n));
-    selectSpec(null);
+    setPanelOpen(false);
     loadSpecCosts();
-  }, [selectSpec, loadSpecCosts, setRfNodes]);
+  }, [loadSpecCosts]);
 
   const onPaneClick = useCallback(() => {
     if (radialCtx) { setRadialCtx(null); return; }
@@ -323,51 +329,41 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   return (
     <div style={{ width: '100vw', height: '100vh', background: 'var(--ground)', position: 'relative', overflow: 'hidden' }}>
 
-      {/* Light blooms — give glass something to refract */}
-      <div className="bloom bloom-indigo" style={{ left: -60, top: 60, width: 460, height: 460 }} />
       <div className="bloom bloom-teal" style={{ right: 60, top: -40, width: 420, height: 420 }} />
       <div className="bloom bloom-plum" style={{ left: '44%', bottom: -120, width: 520, height: 460 }} />
 
       {/* ── Floating toolbar ─────────────────────────────────── */}
       <div style={toolbar}>
-        {/* Left: wordmark + toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+        {/* Left: wordmark + the whole nav, as the design groups it */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 22, minWidth: 0, overflowX: 'auto', scrollbarWidth: 'none' }}>
           <span className="display" style={wordmark}>Proof</span>
-          {specsLoading && <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--text-muted)' }}>Loading…</span>}
           <div style={toggle}>
-            <button
-              onClick={() => setCanvasMode('canvas')}
-              style={canvasMode === 'canvas' ? toggleActive : toggleInactive}
-            >
-              Canvas
-            </button>
-            <button
-              onClick={() => setCanvasMode('commons')}
-              style={canvasMode === 'commons' ? toggleActive : toggleInactive}
-            >
-              Commons
-            </button>
-          </div>
-        </div>
-
-        {/* Right: model selector + actions + avatar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {user && (
-            <>
-              <button onClick={() => setShowSettings(true)} style={modelPill}>
-                <span style={{ fontFamily: 'var(--font-ui)', fontSize: 10, color: 'var(--text-muted)' }}>Model</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>GP% ex-VAT</span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>▾</span>
-              </button>
+            <button onClick={() => setCanvasMode('canvas')}
+                    style={canvasMode === 'canvas' ? toggleActive : toggleInactive}>Canvas</button>
+            <button onClick={() => setCanvasMode('commons')}
+                    style={canvasMode === 'commons' ? toggleActive : toggleInactive}>Commons</button>
+            {user && <>
               <button onClick={() => setShowLibrary(true)} style={toolbarBtn}>Library</button>
               <button onClick={() => setShowPreps(true)} style={toolbarBtn}>Preps</button>
               <button onClick={() => setShowVenues(true)} style={toolbarBtn}>Venues</button>
-              <button onClick={handleNewSpec} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>+ New Spec</button>
-              <button onClick={onLogoutClick} style={toolbarBtn}>Sign Out</button>
+            </>}
+          </div>
+          {specsLoading && <span style={loadingNote}>Loading…</span>}
+        </div>
+
+        {/* Right: costing model + the one live action + avatar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexShrink: 0 }}>
+          {user && (
+            <>
+              <button onClick={() => setShowSettings(true)} style={modelPill}>
+                model <span style={{ color: 'var(--ink)' }}>{activeFormulaId === 'gp_ex_vat' ? 'gp% ex-vat' : activeFormulaId}</span> ▾
+              </button>
+              <button onClick={handleNewSpec} style={{ ...toolbarBtn, color: 'var(--accent)' }}>+ New spec</button>
+              <button onClick={onLogoutClick} style={toolbarBtn}>Sign out</button>
             </>
           )}
           {!user && (
-            <button onClick={onLoginClick} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>Sign In</button>
+            <button onClick={onLoginClick} style={{ ...toolbarBtn, color: 'var(--accent)' }}>Sign in</button>
           )}
           {user && (
             <div style={avatar}>
@@ -411,7 +407,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           deleteKeyCode={null}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="rgba(255,255,255,.04)" gap={28} size={1} />
+          <Background color="var(--dot)" gap={26} size={1} />
         </ReactFlow>
 
         {/* Empty states */}
@@ -524,7 +520,10 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
         <IngestPanel onClose={() => setShowIngest(false)} onDone={(id) => selectSpec(id)} />
       )}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {selectedSpecId && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
+      {canvasMode === 'canvas' && user && <LineageStats />}
+      {canvasMode === 'canvas' && user && <SelectionMenu onNewSpec={handleNewSpec} onOpenRecipe={() => setPanelOpen(true)} />}
+
+      {selectedSpecId && panelOpen && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
       {canvasMode === 'commons' && <CommonsPanel onClose={() => setCanvasMode('canvas')} />}
 
       {radialCtx && menuMode === 'radial' && (
@@ -549,98 +548,97 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
+/* Full-bleed rule across the top, as in the design — not a floating pill. */
 const toolbar: React.CSSProperties = {
   position: 'absolute',
-  top: 20, left: 20, right: 20,
+  top: 0, left: 0, right: 0,
   height: 52,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '0 18px',
-  borderRadius: 'var(--r-bar)',
-  background: 'linear-gradient(168deg, rgba(255,255,255,.085), rgba(255,255,255,.025))',
-  backdropFilter: 'blur(24px) saturate(135%)',
-  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
-  border: '1px solid rgba(255,255,255,.14)',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.2), 0 12px 30px -14px rgba(0,0,0,.7)',
+  padding: '0 24px',
+  gap: 18,
+  background: 'var(--card)',
+  borderBottom: '1px solid rgba(26,26,23,.22)',
   zIndex: 60,
   pointerEvents: 'all',
 };
 
-const wordmark: React.CSSProperties = {
-  fontSize: 20,
-  fontWeight: 700,
-  letterSpacing: '-0.02em',
+const loadingNote: React.CSSProperties = {
+  font: '400 10px/1 var(--font-mono)',
+  color: 'var(--ink-45)',
+  whiteSpace: 'nowrap',
 };
 
+const wordmark: React.CSSProperties = {
+  font: '500 17px/1 var(--font-display)',
+  color: 'var(--ink)',
+};
+
+/* Nav reads as words with a rule under the current one — no pill, no chrome. */
 const toggle: React.CSSProperties = {
   display: 'flex',
-  gap: 2,
-  background: 'rgba(255,255,255,.05)',
-  border: '1px solid rgba(255,255,255,.08)',
-  borderRadius: 9,
-  padding: 3,
+  gap: 22,
+  alignItems: 'baseline',
 };
 
 const toggleActive: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 11,
-  fontWeight: 600,
-  color: '#0c0b14',
-  background: 'rgba(230,235,245,.92)',
-  padding: '5px 12px',
-  borderRadius: 6,
+  font: '400 13px/1 var(--font-display)',
+  color: 'var(--ink)',
+  background: 'none',
   border: 'none',
+  borderBottom: '1px solid var(--ink)',
+  padding: '0 0 2px',
   cursor: 'pointer',
 };
 
 const toggleInactive: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)',
-  fontSize: 11,
-  fontWeight: 500,
-  color: 'var(--text-muted)',
-  padding: '5px 12px',
+  font: '400 13px/1 var(--font-display)',
+  color: 'var(--ink-72)',
   background: 'none',
   border: 'none',
+  borderBottom: '1px solid transparent',
+  padding: '0 0 2px',
   cursor: 'pointer',
 };
 
 const modelPill: React.CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  background: 'rgba(255,255,255,.05)',
-  border: '1px solid rgba(255,255,255,.1)',
-  borderRadius: 9,
-  padding: '6px 11px',
+  alignItems: 'baseline',
+  gap: 6,
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: "400 10.5px/1 var(--font-mono)",
+  color: 'var(--ink-72)',
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
 };
 
 const toolbarBtn: React.CSSProperties = {
-  background: 'rgba(255,255,255,.05)',
-  border: '1px solid rgba(255,255,255,.1)',
-  borderRadius: 7,
-  color: 'var(--text-2)',
+  background: 'none',
+  border: 'none',
+  borderRadius: 0,
+  color: 'var(--ink-72)',
   cursor: 'pointer',
-  fontFamily: 'var(--font-ui)',
-  fontSize: 12,
-  fontWeight: 500,
-  padding: '5px 12px',
+  font: '400 13px/1 var(--font-display)',
+  padding: 0,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
 };
 
 const avatar: React.CSSProperties = {
-  width: 30,
-  height: 30,
-  borderRadius: '50%',
-  background: 'linear-gradient(140deg, #3a3380, #5a2a66)',
-  border: '1px solid rgba(255,255,255,.18)',
+  width: 24,
+  height: 24,
+  borderRadius: 0,
+  background: 'none',
+  border: '1px solid rgba(26,26,23,.35)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontFamily: 'var(--font-ui)',
-  fontSize: 12,
-  fontWeight: 600,
-  color: 'var(--text)',
+  font: "400 10px/1 var(--font-mono)",
+  color: 'var(--ink)',
   flexShrink: 0,
 };
 
@@ -657,18 +655,13 @@ const emptyState: React.CSSProperties = {
 // isn't using — so its right-hand buttons can never end up under a panel.
 const zoomDock: React.CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: 5,
-  borderRadius: 13,
-  maxWidth: '100%',
+  alignItems: 'stretch',
   flexWrap: 'wrap',
-  justifyContent: 'center',
-  background: 'linear-gradient(168deg, rgba(255,255,255,.08), rgba(255,255,255,.03))',
-  backdropFilter: 'blur(24px) saturate(135%)',
-  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
-  border: '1px solid rgba(255,255,255,.12)',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.18), 0 14px 34px -14px rgba(0,0,0,.7)',
+  maxWidth: 'calc(100vw - 48px)',
+  background: 'var(--card)',
+  border: '1px solid var(--rule-strong)',
+  borderRadius: 0,
+  overflow: 'hidden',
   pointerEvents: 'all',
 };
 
@@ -677,8 +670,9 @@ const zoomDock: React.CSSProperties = {
 // so the dock is never buried — that bug made Delete unclickable.
 const dockRail: React.CSSProperties = {
   position: 'absolute',
-  bottom: 22,
-  left: 12,
+  bottom: 24,
+  left: 24,
+  maxWidth: 'calc(100vw - 48px)',
   display: 'flex',
   justifyContent: 'center',
   pointerEvents: 'none',
@@ -691,13 +685,12 @@ const dockBtn: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: 'transparent',
+  background: 'none',
   border: 'none',
-  borderRadius: 7,
-  color: 'var(--text-2)',
-  fontFamily: 'var(--font-ui)',
-  fontSize: 16,
-  fontWeight: 600,
+  borderRight: '1px solid var(--rule)',
+  borderRadius: 0,
+  color: 'var(--ink)',
+  font: '400 11px/1 var(--font-mono)',
   cursor: 'pointer',
 };
 
@@ -705,14 +698,13 @@ const dockTextBtn: React.CSSProperties = {
   height: 30,
   display: 'flex',
   alignItems: 'center',
-  padding: '0 11px',
-  background: 'transparent',
-  border: '1px solid transparent',
-  borderRadius: 7,
-  color: 'var(--text-2)',
-  fontFamily: 'var(--font-ui)',
-  fontSize: 11,
-  fontWeight: 500,
+  padding: '0 13px',
+  background: 'none',
+  border: 'none',
+  borderRight: '1px solid var(--rule)',
+  borderRadius: 0,
+  color: 'var(--ink)',
+  font: '400 12.5px/1 var(--font-display)',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
 };
@@ -720,9 +712,8 @@ const dockTextBtn: React.CSSProperties = {
 function dockToggleBtn(active: boolean): React.CSSProperties {
   return {
     ...dockTextBtn,
-    background: active ? 'rgba(230,235,245,.92)' : 'transparent',
-    color: active ? '#0c0b14' : 'var(--text-muted)',
-    fontWeight: active ? 600 : 500,
+    background: active ? 'var(--ink)' : 'none',
+    color: active ? 'var(--on-ink)' : 'var(--ink-72)',
   };
 }
 
@@ -730,18 +721,18 @@ function dockToggleBtn(active: boolean): React.CSSProperties {
 function dockActionBtn(disabled: boolean): React.CSSProperties {
   return {
     ...dockTextBtn,
-    color: disabled ? 'var(--text-muted)' : 'var(--text-2)',
-    opacity: disabled ? 0.45 : 1,
+    color: disabled ? 'var(--ink-45)' : 'var(--ink)',
     cursor: disabled ? 'default' : 'pointer',
   };
 }
 
 const dockCount: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 11,
-  fontWeight: 600,
-  color: 'var(--cyan)',
-  padding: '0 4px 0 6px',
+  display: 'flex',
+  alignItems: 'center',
+  padding: '8px 13px',
+  borderRight: '1px solid var(--rule)',
+  font: '400 10.5px/1 var(--font-mono)',
+  color: 'var(--accent)',
   whiteSpace: 'nowrap',
   userSelect: 'none',
 };
@@ -757,24 +748,26 @@ const dockErrorText: React.CSSProperties = {
 };
 
 const dockCountIdle: React.CSSProperties = {
-  ...dockCount,
-  color: 'var(--text-muted)',
-  opacity: 0.7,
-};
-
-const dockZoom: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 11,
-  fontWeight: 600,
-  color: 'var(--text-2)',
-  minWidth: 40,
-  textAlign: 'center',
+  display: 'flex',
+  alignItems: 'center',
+  padding: '8px 13px',
+  borderRight: '1px solid var(--rule)',
+  font: '400 10.5px/1 var(--font-mono)',
+  color: 'var(--ink-45)',
+  whiteSpace: 'nowrap',
   userSelect: 'none',
 };
 
-const dockDivider: React.CSSProperties = {
-  width: 1,
-  height: 18,
-  background: 'rgba(255,255,255,.1)',
-  margin: '0 2px',
+const dockZoom: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 52,
+  padding: '8px 12px',
+  borderRight: '1px solid var(--rule)',
+  font: '400 11px/1 var(--font-mono)',
+  color: 'var(--ink)',
+  whiteSpace: 'nowrap',
 };
+
+const dockDivider: React.CSSProperties = { display: 'none' };

@@ -276,8 +276,6 @@ function GaugeTile({ label, value, unit, accent }: { label: string; value: strin
 const panelOuter: React.CSSProperties = {
   position: 'fixed', top: 0, right: 0, bottom: 0, width: 560,
   background: 'var(--panel-fill)',
-  backdropFilter: 'var(--glass-blur)',
-  WebkitBackdropFilter: 'var(--glass-blur)',
   borderLeft: '1px solid rgba(255,255,255,.12)',
   boxShadow: 'inset 1px 0 0 var(--panel-edge-cyan), inset 0 1px 0 rgba(255,255,255,.16), -14px 0 48px rgba(0,0,0,.65)',
   zIndex: 3100,
@@ -463,13 +461,12 @@ const branchBtnStyle: React.CSSProperties = {
 function publishBtnStyle(disabled: boolean): React.CSSProperties {
   return {
     flex: 2,
-    background: disabled ? 'rgba(255,255,255,.04)' : 'linear-gradient(90deg, rgba(127,230,255,.18), rgba(255,135,210,.16))',
-    border: disabled ? '1px solid rgba(255,255,255,.08)' : '1px solid rgba(127,230,255,.3)',
-    borderRadius: 10,
-    color: disabled ? 'var(--text-muted)' : 'var(--text)',
+    background: disabled ? 'none' : 'var(--ink)',
+    border: `1px solid ${disabled ? 'var(--rule)' : 'var(--ink)'}`,
+    borderRadius: 0,
+    color: disabled ? 'var(--ink-45)' : 'var(--on-ink)',
     cursor: disabled ? 'default' : 'pointer',
-    fontFamily: 'var(--font-ui)', fontSize: 13, fontWeight: 600, padding: '10px',
-    opacity: disabled ? 0.5 : 1,
+    font: '400 13px/1 var(--font-display)', padding: '11px',
   };
 }
 

@@ -78,8 +78,6 @@ const container: React.CSSProperties = {
   transform: 'translateX(-50%)',
   width: 200,
   background: 'linear-gradient(168deg, rgba(255,255,255,.10), rgba(255,255,255,.04))',
-  backdropFilter: 'blur(24px) saturate(135%)',
-  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
   border: '1px solid var(--glass-border)',
   borderRadius: 12,
   boxShadow: 'inset 1px 0 0 var(--edge-cyan), inset -1px 0 0 var(--edge-magenta), inset 0 1px 0 var(--edge-top), 0 16px 40px rgba(0,0,0,.6)',

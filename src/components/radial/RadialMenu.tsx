@@ -389,8 +389,6 @@ const centre: React.CSSProperties = {
 const amountBox: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center',
   background: 'linear-gradient(168deg, rgba(255,255,255,.10), rgba(255,255,255,.04))',
-  backdropFilter: 'blur(24px) saturate(135%)',
-  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
   border: '1px solid rgba(255,255,255,.16)',
   boxShadow: 'inset 0 1px 0 rgba(255,255,255,.24), inset 1.2px 0 0 rgba(120,225,255,.42), inset -1.2px 0 0 rgba(255,135,210,.36), 0 18px 36px -16px rgba(0,0,0,.8)',
   borderRadius: 12,
