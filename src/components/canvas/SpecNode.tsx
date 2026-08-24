@@ -153,7 +153,7 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
       onTouchMove={clearLongPress}
       onTouchCancel={clearLongPress}
     >
-      <Handle type="target" position={Position.Left} style={handle} />
+      <Handle type="target" position={Position.Top} style={handle} />
 
       <button
         type="button"
@@ -226,7 +226,7 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
         </span>
       </div>
 
-      <Handle type="source" position={Position.Right} style={handle} />
+      <Handle type="source" position={Position.Bottom} style={handle} />
     </Glass>
   );
 }
