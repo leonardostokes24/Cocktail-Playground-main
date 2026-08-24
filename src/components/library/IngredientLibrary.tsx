@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import CatalogueSearch from './CatalogueSearch';
 import { useProofStore } from '../../store/useProofStore';
 import type { Ingredient, IngredientInput } from '../../lib/supabase/queries';
 import IngredientForm from './IngredientForm';
@@ -13,6 +14,7 @@ export default function IngredientLibrary({ onClose }: Props) {
   const { ingredients, ingredientsLoading, ingredientsError, loadIngredients, addIngredient, editIngredient, removeIngredient } = useProofStore();
   const [mode, setMode] = useState<Mode>({ kind: 'idle' });
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showCatalogue, setShowCatalogue] = useState(false);
 
   useEffect(() => { loadIngredients(); }, []);
 
@@ -42,6 +44,9 @@ export default function IngredientLibrary({ onClose }: Props) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {mode.kind === 'idle' && (
             <button onClick={() => setMode({ kind: 'adding' })} style={btnAdd}>+ Add ingredient</button>
+          )}
+          {mode.kind === 'idle' && (
+            <button onClick={() => setShowCatalogue(true)} style={btnAdd}>Browse catalogue</button>
           )}
           <button onClick={onClose} style={btnClose}>✕</button>
         </div>
@@ -113,6 +118,8 @@ export default function IngredientLibrary({ onClose }: Props) {
           )}
         </div>
       )}
+
+      {showCatalogue && <CatalogueSearch onClose={() => setShowCatalogue(false)} />}
     </div>
   );
 }
