@@ -1,21 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useReactFlow, useViewport } from '@xyflow/react';
+import { UNITS } from '../../utils/units';
 import { useProofStore } from '../../store/useProofStore';
 import { childCounts } from '../../utils/childCounts';
+import { searchCatalogueIngredients } from '../../lib/supabase/catalogue';
+import { toMl } from '../../utils/units';
+import { computeSpecCosts } from '../../utils/calculations';
 
 /**
  * The floating action menu from Claude Design "Proof New UI" 8a.
  *
- * Always on screen and tethered to whatever is selected, rather than summoned at
- * the pointer and dismissed. That is the whole idea of 8a: the nodes stay plain
- * cards and the menu is the one live surface. It never covers its own target —
- * it sits to the side of the selected node and flips when it would run off.
+ * 8a draws it always-on-screen; here it opens and closes like a normal menu —
+ * right-click or ⌘K to summon it at the pointer, escape or a click outside to
+ * dismiss, and it closes itself once an action has run. What it keeps from 8a
+ * is everything else: it names its target, never covers it, and the field acts
+ * or searches depending on what you type.
  *
- * ⌥-drag the header to move it, ⌘. to pin it where you left it, ⌘K to type.
+ * ⌥-drag the header to move it, ⌘. to pin it where you left it.
  */
 
 type ActionId =
-  | 'branch' | 'add' | 'swap' | 'open'
+  | 'branch' | 'add' | 'tidy' | 'open'
   | 'duplicate' | 'to-prep' | 'publish' | 'delete';
 
 type Action = {
@@ -29,10 +34,13 @@ type Action = {
 const ACTIONS: Action[] = [
   { id: 'branch',    label: 'Branch' },
   { id: 'add',       label: 'Add component' },
-  { id: 'swap',      label: 'Swap', soon: true },
+  // 8a draws "Swap" here. Swapping needs a component to swap *from*, which this
+  // menu has no way to name, so the slot carries Tidy — a real action on the
+  // same target — rather than a cell that greys out forever.
+  { id: 'tidy',      label: 'Tidy lineage' },
   { id: 'open',      label: 'Open recipe' },
   { id: 'duplicate', label: 'Duplicate' },
-  { id: 'to-prep',   label: 'Convert to prep', soon: true },
+  { id: 'to-prep',   label: 'Convert to prep' },
   { id: 'publish',   label: 'Publish', accent: true },
   { id: 'delete',    label: 'Delete', accent: true },
 ];
@@ -59,11 +67,28 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
   const publishSpec  = useProofStore(s => s.publishSpec);
   const removeSpec   = useProofStore(s => s.removeSpec);
   const duplicate    = useProofStore(s => s.duplicateSpecs);
+  const tidySpecs    = useProofStore(s => s.tidySpecs);
+  const ingredients  = useProofStore(s => s.ingredients);
+  const recentIds    = useProofStore(s => s.recentIngredientIds);
+  const componentsMap = useProofStore(s => s.specComponentsMap);
+  const addComponent = useProofStore(s => s.addComponent);
+  const importCatalogue = useProofStore(s => s.importCatalogueIngredient);
+  const addPrep      = useProofStore(s => s.addPrep);
+  const addPrepComponent = useProofStore(s => s.addPrepComponent);
+  const dilution     = useProofStore(s => s.dilutionOverrides);
+  const sundries     = useProofStore(s => s.sundriesPerServe);
+  const wasteRate    = useProofStore(s => s.wasteRate);
 
   const { flowToScreenPosition } = useReactFlow();
   const viewport = useViewport();
 
   const [query, setQuery] = useState('');
+  // Keep typing past the actions and the field becomes an ingredient search —
+  // 8a's own lineage (6a/6b) is exactly this: type to act, keep typing to find.
+  const [catalogueHits, setCatalogueHits] = useState<{ id: string; name: string; type: string | null }[]>([]);
+  const [pending, setPending] = useState<{ id: string; name: string; catalogue: boolean } | null>(null);
+  const [amount, setAmount] = useState('30');
+  const [unit, setUnit] = useState('ml');
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pinned, setPinned] = useState<{ x: number; y: number } | null>(() => {
@@ -71,8 +96,10 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
   });
   // Where a right-click put it. Outranks the tether, yields to an explicit pin.
   const [summoned, setSummoned] = useState<{ x: number; y: number } | null>(null);
+  const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dragFrom = useRef<{ dx: number; dy: number } | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
 
   const spec = specs.find(s => s.id === selectedId) ?? null;
   const detaching = spec ? (childCounts(specs)[spec.id] ?? 0) : 0;
@@ -102,6 +129,8 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
     setPinned(null);
     try { localStorage.removeItem(PIN_KEY); } catch { /* private mode */ }
     setSummoned({ x: clampedX, y: clampedY });
+    setOpen(true);
+    setPending(null);
     setConfirmDelete(false);
     setQuery('');
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -125,7 +154,16 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key.toLowerCase() === 'k') { e.preventDefault(); inputRef.current?.focus(); }
+      if (meta && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setOpen(true);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
+      if (e.key === 'Escape' && open) {
+        // The field handles its own escape first (back out of the amount step).
+        if (document.activeElement === inputRef.current) return;
+        setOpen(false);
+      }
       if (meta && e.key === '.') {
         e.preventDefault();
         setPinned(prev => {
@@ -135,9 +173,18 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
         });
       }
     };
+    const onDown = (e: PointerEvent) => {
+      if (!open) return;
+      if (shellRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [anchored]);
+    window.addEventListener('pointerdown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onDown);
+    };
+  }, [anchored, open]);
 
   // ── ⌥-drag the header to move it ───────────────────────────────────────────
   const onHeaderDown = useCallback((e: React.PointerEvent) => {
@@ -175,6 +222,53 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
         case 'open':      selectSpec(spec.id); onOpenRecipe(); break;
         case 'add':       selectSpec(spec.id); onOpenRecipe({ builder: true }); break;
         case 'duplicate': await duplicate([spec.id]); break;
+        case 'tidy': {
+          // Lay out this spec's whole family, not an arbitrary selection.
+          const byId = new Map(specs.map(x => [x.id, x]));
+          const rootOf = (sid: string) => {
+            const seen = new Set([sid]);
+            let cur = byId.get(sid);
+            while (cur?.parent_spec_id) {
+              const parent = byId.get(cur.parent_spec_id);
+              if (!parent || seen.has(parent.id)) break;
+              seen.add(parent.id); cur = parent;
+            }
+            return cur?.id ?? sid;
+          };
+          const root = rootOf(spec.id);
+          await tidySpecs(specs.filter(x => rootOf(x.id) === root).map(x => x.id));
+          break;
+        }
+        case 'to-prep': {
+          // A prep is a batch, so its yield is the spec's finished volume —
+          // dilution included, because that is what actually ends up in the jar.
+          const comps = componentsMap[spec.id] ?? [];
+          if (!comps.length) break;
+          const costs = computeSpecCosts(spec.method, spec.sale_price, comps, dilution,
+            { sundriesPerServe: sundries, wasteRate });
+          const prep = await addPrep({
+            name: spec.name,
+            yield_ml: Math.max(1, Math.round(costs.finalVolumeMl)),
+            method: spec.method,
+            notes: `Converted from spec "${spec.name}".`,
+          });
+          // prep_components take ingredients only — no nesting (⚑). A prep
+          // component inside the spec can't travel, so it is skipped rather
+          // than flattened into something the costing would double-count.
+          let pos = 0;
+          for (const c of comps) {
+            if (!c.ingredient_id) continue;
+            await addPrepComponent({
+              prep_id: prep.id,
+              ingredient_id: c.ingredient_id,
+              amount_ml: c.amount_ml,
+              original_amount: c.original_amount,
+              original_unit: c.original_unit,
+              position: pos++,
+            });
+          }
+          break;
+        }
         case 'publish':   await publishSpec(spec.id); break;
         case 'delete':    await removeSpec(spec.id); break;
       }
@@ -182,24 +276,95 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
       setBusy(false);
       setConfirmDelete(false);
       setQuery('');
+      setOpen(false);
     }
-  }, [spec, busy, confirmDelete, branchSpec, selectSpec, duplicate, publishSpec, removeSpec, onNewSpec, onOpenRecipe]);
+  }, [spec, specs, busy, confirmDelete, branchSpec, selectSpec, duplicate, tidySpecs, componentsMap,
+      dilution, sundries, wasteRate, addPrep, addPrepComponent, publishSpec, removeSpec, onNewSpec, onOpenRecipe]);
 
-  // Typing filters the actions; ↵ runs the only remaining one.
-  const matches = query.trim()
-    ? ACTIONS.filter(a => a.label.toLowerCase().includes(query.trim().toLowerCase()))
-    : ACTIONS;
+  const q = query.trim().toLowerCase();
+
+  // Typing filters the actions first — they are what you usually want.
+  const matches = q ? ACTIONS.filter(a => a.label.toLowerCase().includes(q)) : ACTIONS;
+
+  // Catalogue lookup is remote, so it streams in beside the local list rather
+  // than blocking it. A failure is silent: the catalogue is a bonus, never a gate.
+  useEffect(() => {
+    if (!q || !spec) { setCatalogueHits([]); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      searchCatalogueIngredients(q)
+        .then(rows => { if (!cancelled) setCatalogueHits(rows.map(r => ({ id: r.id, name: r.name, type: r.type }))); })
+        .catch(() => { if (!cancelled) setCatalogueHits([]); });
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [q, spec]);
+
+  // ⚑ Recents first, then everything else. Catalogue entries you don't own are
+  // appended and imported unpriced on the way in.
+  const results = useMemo(() => {
+    if (!q || !spec) return [];
+    const rank = new Map(recentIds.map((id, i) => [id, i]));
+    const own = ingredients
+      .filter(i => i.name.toLowerCase().includes(q))
+      .sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
+      .map(i => ({ id: i.id, name: i.name, type: i.type, catalogue: false }));
+    const ownNames = new Set(own.map(o => o.name.toLowerCase()));
+    const fromCatalogue = catalogueHits
+      .filter(c => !ownNames.has(c.name.toLowerCase()))
+      .map(c => ({ id: c.id, name: c.name, type: c.type, catalogue: true }));
+    return [...own, ...fromCatalogue].slice(0, 6);
+  }, [q, spec, ingredients, recentIds, catalogueHits]);
+
+  const commitAmount = useCallback(async () => {
+    if (!spec || !pending) return;
+    const n = parseFloat(amount);
+    if (!n || n <= 0) return;
+    setBusy(true);
+    try {
+      // A catalogue pick isn't yours yet — import it unpriced first. ⚑ The
+      // shared catalogue's suggested price is never adopted on your behalf.
+      const ingredientId = pending.catalogue
+        ? (await importCatalogue(pending.id, null)).id
+        : pending.id;
+      await addComponent({
+        spec_id: spec.id,
+        ingredient_id: ingredientId,
+        prep_id: null,
+        amount_ml: toMl(n, unit),
+        original_amount: n,
+        original_unit: unit,
+        position: componentsMap[spec.id]?.length ?? 0,
+      });
+      setPending(null);
+      setQuery('');
+      setAmount('30');
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }, [spec, pending, amount, unit, importCatalogue, addComponent, componentsMap]);
 
   const onFieldKey = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') { setQuery(''); (e.target as HTMLInputElement).blur(); }
-    if (e.key === 'Enter' && matches.length) { e.preventDefault(); run(matches[0]); }
-  }, [matches, run]);
+    if (e.key === 'Escape') {
+      if (pending) { setPending(null); return; }
+      if (query) { setQuery(''); return; }
+      setOpen(false);
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // Actions win over ingredients — "del" should delete, not find Delicata.
+    if (matches.length) { run(matches[0]); return; }
+    if (results.length) setPending({ id: results[0].id, name: results[0].name, catalogue: results[0].catalogue });
+  }, [matches, results, pending, query, run]);
+
+  if (!open) return null;
 
   return (
-    <div style={{ ...shell, left: anchored.x, top: anchored.y }} className="nodrag nopan">
+    <div ref={shellRef} style={{ ...shell, left: anchored.x, top: anchored.y }} className="nodrag nopan">
       <div style={header} onPointerDown={onHeaderDown}>
         <span>acting on</span>
-        <span style={{ opacity: .72 }}>⌥ drag to move · ⌘. to {pinned ? 'unpin' : 'pin'}</span>
+        <span style={{ opacity: .72 }}>⌥ drag · ⌘. {pinned ? 'unpin' : 'pin'} · esc close</span>
       </div>
 
       <div style={targetRow}>
@@ -220,6 +385,38 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
         />
         <span style={fieldHint}>⌘K</span>
       </div>
+
+      {pending ? (
+        <div style={amountBox}>
+          <div style={amountName}>{pending.name}{pending.catalogue && <span style={importTag}>import</span>}</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              autoFocus type="number" min={0} step="any" value={amount}
+              onChange={e => setAmount(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitAmount(); }
+                                if (e.key === 'Escape') setPending(null); }}
+              style={amountInput}
+            />
+            <select value={unit} onChange={e => setUnit(e.target.value)} style={unitSelect}>
+              {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <button onClick={commitAmount} disabled={busy} style={addBtn}>{busy ? 'Adding…' : 'Add'}</button>
+            <button onClick={() => setPending(null)} style={backBtn}>Back</button>
+          </div>
+        </div>
+      ) : results.length ? (
+        <div style={resultList}>
+          {results.map(r => (
+            <button key={`${r.catalogue}:${r.id}`}
+                    onClick={() => setPending({ id: r.id, name: r.name, catalogue: r.catalogue })}
+                    style={resultRow}>
+              <span style={{ flex: 1, textAlign: 'left' }}>{r.name}</span>
+              {r.type && <span style={resultType}>{r.type}</span>}
+              {r.catalogue && <span style={importTag}>import</span>}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div style={grid}>
         {matches.map((a, i) => {
@@ -248,7 +445,10 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
       </div>
 
       <div style={footer}>
-        {spec ? 'follows the selection' : 'empty canvas → new spec'}
+        {pending ? '↵ to add · esc to go back'
+          : results.length ? `${results.length} ingredient${results.length > 1 ? 's' : ''} · ↵ adds the first`
+          : spec ? 'type to act or search · esc to close'
+          : 'empty canvas → new spec'}
       </div>
     </div>
   );
@@ -360,6 +560,64 @@ const soonTag: React.CSSProperties = {
   color: 'var(--ink-72)',
   border: '1px solid var(--rule)',
   padding: '2px 4px',
+};
+
+const resultList: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column',
+  borderBottom: '1px solid rgba(26,26,23,.2)',
+};
+
+const resultRow: React.CSSProperties = {
+  display: 'flex', alignItems: 'baseline', gap: 8,
+  padding: '9px 15px',
+  background: 'none', border: 'none',
+  borderBottom: '1px solid var(--rule-faint)',
+  font: '400 13px/1 var(--font-display)', color: 'var(--ink)',
+  cursor: 'pointer', textAlign: 'left',
+};
+
+const resultType: React.CSSProperties = {
+  font: '400 9.5px/1 var(--font-mono)', color: 'var(--ink-72)',
+};
+
+const importTag: React.CSSProperties = {
+  font: '400 8.5px/1 var(--font-mono)', letterSpacing: '.06em',
+  color: 'var(--accent)', border: '1px solid var(--accent-line)',
+  padding: '2px 4px', marginLeft: 6,
+};
+
+const amountBox: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', gap: 9,
+  padding: '12px 15px',
+  borderBottom: '1px solid rgba(26,26,23,.2)',
+};
+
+const amountName: React.CSSProperties = {
+  font: '500 15px/1 var(--font-display)', color: 'var(--ink)',
+};
+
+const amountInput: React.CSSProperties = {
+  width: 74, padding: '7px 9px',
+  background: 'none', border: '1px solid var(--rule-strong)', borderRadius: 0,
+  font: '400 12.5px/1 var(--font-mono)', color: 'var(--ink)', outline: 'none',
+};
+
+const unitSelect: React.CSSProperties = {
+  padding: '7px 6px',
+  background: 'none', border: '1px solid var(--rule-strong)', borderRadius: 0,
+  font: '400 12.5px/1 var(--font-mono)', color: 'var(--ink)', outline: 'none',
+};
+
+const addBtn: React.CSSProperties = {
+  padding: '7px 13px', background: 'var(--ink)', color: 'var(--on-ink)',
+  border: '1px solid var(--ink)', borderRadius: 0,
+  font: '400 12.5px/1 var(--font-display)', cursor: 'pointer',
+};
+
+const backBtn: React.CSSProperties = {
+  padding: '7px 11px', background: 'none', color: 'var(--ink-72)',
+  border: '1px solid var(--rule-strong)', borderRadius: 0,
+  font: '400 12.5px/1 var(--font-display)', cursor: 'pointer',
 };
 
 const footer: React.CSSProperties = {

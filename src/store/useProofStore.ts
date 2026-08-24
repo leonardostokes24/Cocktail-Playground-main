@@ -95,6 +95,9 @@ interface ProofState {
   removeSpecs: (ids: string[]) => Promise<void>;
   duplicateSpecs: (ids: string[]) => Promise<void>;
   tidySpecs: (ids: string[]) => Promise<void>;
+  /** Bumped whenever the store re-positions nodes, so the canvas knows to take
+   *  stored coordinates instead of the live ones it normally preserves. */
+  layoutNonce: number;
   publishSpecs: (ids: string[]) => Promise<void>;
   selectSpec: (id: string | null) => void;
   branchSpec: (parentId: string, position?: { x: number; y: number }) => Promise<Spec>;
@@ -306,6 +309,7 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
       }));
     }
   },
+  layoutNonce: 0,
   tidySpecs: async (ids) => {
     const chosen = get().specs.filter((s) => ids.includes(s.id));
     if (!chosen.length) return;
@@ -322,6 +326,7 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
         canvas_y: originY + Math.floor(i / perRow) * 300,
       });
     }
+    set((st) => ({ layoutNonce: st.layoutNonce + 1 }));
   },
   publishSpecs: async (ids) => {
     for (const id of ids) {

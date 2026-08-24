@@ -125,8 +125,9 @@ cross-creator lineage; `components_snapshot` JSONB) · specs gain `visibility`, 
 
 ---
 
-## Radial menu rules ⚑
-Radial menus are measurably faster with practice but **harder to learn** — design for both:
+## Menu rules ⚑
+The radial/command-pad is gone. One menu: a floating panel summoned at the pointer,
+naming the target it acts on. Rules that survived, because they were never about the ring:
 - **Max 6–8 segments per ring** (accuracy ceiling). More = sub-rings.
 - **Anchor on the touched object.** Long-press 300ms → drag-to-segment → release (touch);
   right-click (desktop); hotkey (keyboard). Account for the finger obscuring the menu

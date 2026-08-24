@@ -37,7 +37,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     loadSpecs, loadSpecCosts, loadIngredients, loadAllSpecComponents,
     createSpec, editSpec, selectSpec, branchSpec, attachBranch,
     removeSpecs, duplicateSpecs, tidySpecs, publishSpecs,
-    activeFormulaId, forkSources, loadForkSources,
+    activeFormulaId, forkSources, loadForkSources, layoutNonce,
   } = useProofStore(useShallow(state => ({
     specs: state.specs,
     specsLoading: state.specsLoading,
@@ -56,6 +56,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     tidySpecs: state.tidySpecs,
     publishSpecs: state.publishSpecs,
     activeFormulaId: state.activeFormulaId,
+    layoutNonce: state.layoutNonce,
     forkSources: state.forkSources,
     loadForkSources: state.loadForkSources,
   })));
@@ -81,6 +82,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const [boxSelect, setBoxSelect] = useState(false);
   const dragSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const didFitRef = useRef(false);
+  const layoutRef = useRef(0);
   // Stable ref for long-press callback — avoids rebuilding node data on every render
   const longPressRef = useRef<(nodeId: string, pos: { x: number; y: number }) => void>(() => {});
   const { fitView, zoomIn, zoomOut, getViewport, screenToFlowPosition } = useReactFlow();
@@ -104,18 +106,23 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       // selection on every specs change (e.g. the debounced drag-position save),
       // which made the bulk actions look broken.
       const liveById = new Map(current.map(n => [n.id, n]));
+      // A layout pass (Tidy) is the one case where stored coordinates must win:
+      // otherwise the live positions preserved here silently discard the new
+      // layout and Tidy appears to do nothing at all.
+      const takeStored = layoutRef.current !== layoutNonce;
+      layoutRef.current = layoutNonce;
       return specs.map(spec => {
         const live = liveById.get(spec.id);
         return {
           id: spec.id,
           type: 'specNode' as const,
-          position: live?.position ?? { x: spec.canvas_x, y: spec.canvas_y },
+          position: takeStored || !live ? { x: spec.canvas_x, y: spec.canvas_y } : live.position,
           selected: live?.selected ?? false,
           data: stableNodeData,
         };
       });
     });
-  }, [specs]);
+  }, [specs, layoutNonce]);
 
   useEffect(() => {
     // Branch: your own version of your own drink — parent is a spec you own.
