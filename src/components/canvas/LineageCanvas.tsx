@@ -14,6 +14,7 @@ import GradientEdge from '../CustomEdge';
 import IngredientLibrary from '../library/IngredientLibrary';
 import PrepLibrary from '../library/PrepLibrary';
 import IngestPanel from '../library/IngestPanel';
+import VenuePanel from '../library/VenuePanel';
 import SpecPanel from '../spec/SpecPanel';
 import SettingsPanel from '../spec/SettingsPanel';
 import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
@@ -60,6 +61,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const [showLibrary, setShowLibrary] = useState(false);
   const [showPreps, setShowPreps] = useState(false);
   const [showIngest, setShowIngest] = useState(false);
+  const [showVenues, setShowVenues] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
@@ -334,6 +336,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
               </button>
               <button onClick={() => setShowLibrary(true)} style={toolbarBtn}>Library</button>
               <button onClick={() => setShowPreps(true)} style={toolbarBtn}>Preps</button>
+              <button onClick={() => setShowVenues(true)} style={toolbarBtn}>Venues</button>
               <button onClick={handleNewSpec} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>+ New Spec</button>
               <button onClick={onLogoutClick} style={toolbarBtn}>Sign Out</button>
             </>
@@ -491,6 +494,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       {/* ── Panels & menus ───────────────────────────────────── */}
       {showLibrary && <IngredientLibrary onClose={() => setShowLibrary(false)} />}
       {showPreps && <PrepLibrary onClose={() => setShowPreps(false)} />}
+      {showVenues && <VenuePanel onClose={() => setShowVenues(false)} />}
       {showIngest && (
         <IngestPanel onClose={() => setShowIngest(false)} onDone={(id) => selectSpec(id)} />
       )}
