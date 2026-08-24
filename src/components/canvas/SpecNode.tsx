@@ -26,6 +26,12 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
   // Numbers, so this node only re-renders when its own values move.
   const twistNo          = useProofStore(s => twistNumbers(s.specs)[id] ?? 0);
   const childCount       = useProofStore(s => childCounts(s.specs)[id] ?? 0);
+  // Name of the published snapshot this was forked from, or null. A string, so
+  // the node re-renders only when its own source name changes.
+  const forkSourceName   = useProofStore(s => {
+    const fid = s.specs.find(sp => sp.id === id)?.forked_from_published_id;
+    return fid ? (s.forkSources[fid]?.name ?? null) : null;
+  });
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -89,7 +95,11 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
 
   if (!spec) return null;
 
-  const isRoot = !spec.parent_spec_id;
+  // A fork has no parent_spec_id — its parent is someone else's published
+  // snapshot — so testing parent alone labelled every fork as a ROOT, which is
+  // the one thing it definitively is not.
+  const isFork = !!spec.forked_from_published_id;
+  const isRoot = !spec.parent_spec_id && !isFork;
   const isPublished = spec.status === 'published';
 
   const costs = components
@@ -119,9 +129,11 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
 
   // Descriptor line — how the drink is made (the recipe body carries what's in it).
   const twistLabel = twistNo ? `Twist ${twistNo}` : 'Twist';
-  const descriptor = isRoot
-    ? [spec.method, spec.glass].filter(Boolean).join(' · ')
-    : spec.change_note ? `${twistLabel} · ${spec.change_note}` : twistLabel;
+  const descriptor = isFork
+    ? (forkSourceName ? `Forked from ${forkSourceName}` : 'Forked from the commons')
+    : isRoot
+      ? [spec.method, spec.glass].filter(Boolean).join(' · ')
+      : spec.change_note ? `${twistLabel} · ${spec.change_note}` : twistLabel;
 
   // Metrics collapse to one quiet footer line — pricing is secondary to the recipe.
   const metrics = costs
@@ -176,9 +188,11 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
             <p style={descriptorStyle}>{descriptor}</p>
           )}
         </div>
-        {isRoot && (
+        {isFork ? (
+          <span style={forkBadge}>⑂ FORK</span>
+        ) : isRoot ? (
           <span style={rootBadge}>◈ ROOT</span>
-        )}
+        ) : null}
       </div>
 
       {/* Row 2: the recipe — what's actually in the drink */}
@@ -254,6 +268,22 @@ const rootBadge: React.CSSProperties = {
   letterSpacing: '0.08em',
   color: '#8fe0ff',
   border: '1px solid rgba(127,230,255,.3)',
+  borderRadius: 5,
+  padding: '3px 6px',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+  marginLeft: 8,
+};
+
+// Magenta throughout the app means "crossed over from someone else" — the same
+// hue the fork edge uses, so badge and edge read as one idea.
+const forkBadge: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 8.5,
+  fontWeight: 700,
+  letterSpacing: '0.08em',
+  color: '#ffd6f0',
+  border: '1px solid rgba(255,135,210,.34)',
   borderRadius: 5,
   padding: '3px 6px',
   whiteSpace: 'nowrap',

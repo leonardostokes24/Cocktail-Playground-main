@@ -174,3 +174,30 @@ export async function forkPublishedSpec(publishedId: string): Promise<{
     forkedFromPublishedId: publishedId,
   };
 }
+
+/**
+ * Resolve the published snapshots a set of specs were forked from.
+ *
+ * `spec_id` is the snapshot's back-reference to the live spec it was published
+ * from. That spec belongs to the original creator, so for a genuine cross-user
+ * fork it will not be on the caller's canvas (RLS hides it) and comes back as a
+ * row the canvas can't draw an edge to — which is the honest answer. When it
+ * *is* on the canvas (you forked your own published spec), the canvas has both
+ * ends and can draw the dashed fork edge.
+ */
+export type ForkSource = {
+  id: string;
+  spec_id: string | null;
+  name: string;
+  creator_id: string;
+};
+
+export async function listForkSources(publishedIds: string[]): Promise<ForkSource[]> {
+  if (!publishedIds.length) return [];
+  const { data, error } = await supabase
+    .from('published_specs')
+    .select('id, spec_id, name, creator_id')
+    .in('id', publishedIds);
+  if (error) throw error;
+  return (data ?? []) as ForkSource[];
+}

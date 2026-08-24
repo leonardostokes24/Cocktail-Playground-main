@@ -26,9 +26,10 @@ import {
   type Prep, type PrepInput, type PrepComponent, type PrepComponentInput, type PrepCostRow,
 } from '../lib/supabase/preps';
 import {
-  listPublishedFeed, searchPublished, insertPublishedSpec, forkPublishedSpec,
+  listPublishedFeed, searchPublished, insertPublishedSpec, forkPublishedSpec, listForkSources,
   getSpecLineage,
   type PublishedSpec, type ComponentSnapshot, type LineageRow,
+  type ForkSource,
 } from '../lib/supabase/published';
 
 // A prep component's join only carries the prep's name — cost lives in the
@@ -156,6 +157,9 @@ interface ProofState {
   lineageByPublishedId: Record<string, LineageRow[]>;
   lineageLoadingId: string | null;
   loadLineage: (publishedId: string) => Promise<void>;
+  /** published_id -> the snapshot a spec was forked from, for fork edges + badges. */
+  forkSources: Record<string, ForkSource>;
+  loadForkSources: () => Promise<void>;
   // Fork several published specs onto the canvas at once, laid out on a grid.
   preloadPublished: (publishedIds: string[]) => Promise<void>;
 
@@ -634,7 +638,20 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
       specComponentsMap: { ...s.specComponentsMap, [newSpecId]: realComponents },
     }));
     get().selectSpec(newSpecId);
+    // The new spec introduces a fork source the canvas hasn't resolved yet —
+    // without this the node shows the generic fallback and its dashed edge
+    // never appears until the next full reload.
+    await get().loadForkSources();
     return newSpec;
+  },
+  forkSources: {},
+  loadForkSources: async () => {
+    const ids = [...new Set(
+      get().specs.map((s) => s.forked_from_published_id).filter((v): v is string => !!v),
+    )];
+    if (!ids.length) { set({ forkSources: {} }); return; }
+    const rows = await listForkSources(ids);
+    set({ forkSources: Object.fromEntries(rows.map((r) => [r.id, r])) });
   },
   lineageByPublishedId: {},
   lineageLoadingId: null,

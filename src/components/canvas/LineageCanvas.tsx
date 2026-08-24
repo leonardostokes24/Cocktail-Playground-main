@@ -37,7 +37,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     loadSpecs, loadSpecCosts, loadIngredients, loadAllSpecComponents,
     createSpec, editSpec, selectSpec, branchSpec, attachBranch,
     removeSpecs, duplicateSpecs, tidySpecs, publishSpecs,
-    activeFormulaId,
+    activeFormulaId, forkSources, loadForkSources,
   } = useProofStore(useShallow(state => ({
     specs: state.specs,
     specsLoading: state.specsLoading,
@@ -56,6 +56,8 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     tidySpecs: state.tidySpecs,
     publishSpecs: state.publishSpecs,
     activeFormulaId: state.activeFormulaId,
+    forkSources: state.forkSources,
+    loadForkSources: state.loadForkSources,
   })));
 
   const [showLibrary, setShowLibrary] = useState(false);
@@ -88,7 +90,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
   useEffect(() => {
     if (!user) return;
-    loadSpecs().then(() => loadSpecCosts());
+    loadSpecs().then(() => { loadSpecCosts(); loadForkSources(); });
     loadIngredients();
     loadAllSpecComponents();
   }, [user?.id]);
@@ -114,18 +116,41 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [specs]);
 
   useEffect(() => {
-    setRfEdges(
-      specs
-        .filter(s => s.parent_spec_id)
-        .map(s => ({
-          id: `${s.parent_spec_id}→${s.id}`,
-          source: s.parent_spec_id!,
+    // Branch: your own version of your own drink — parent is a spec you own.
+    const branchEdges = specs
+      .filter(s => s.parent_spec_id)
+      .map(s => ({
+        id: `${s.parent_spec_id}→${s.id}`,
+        source: s.parent_spec_id!,
+        target: s.id,
+        type: 'default',
+        label: s.change_note || undefined,
+        data: { kind: 'branch' as const },
+      }));
+
+    // Fork: crossed over from a published snapshot. An edge can only be drawn
+    // when that snapshot's live spec is also on this canvas — for a genuine
+    // cross-user fork it belongs to someone else and RLS hides it, so the node
+    // carries a FORK badge instead of a dangling edge to nowhere.
+    const onCanvas = new Set(specs.map(s => s.id));
+    const forkEdges = specs
+      .filter(s => s.forked_from_published_id)
+      .map(s => {
+        const src = forkSources[s.forked_from_published_id!];
+        if (!src?.spec_id || !onCanvas.has(src.spec_id) || src.spec_id === s.id) return null;
+        return {
+          id: `fork:${src.spec_id}→${s.id}`,
+          source: src.spec_id,
           target: s.id,
           type: 'default',
-          label: s.change_note || undefined,
-        }))
-    );
-  }, [specs]);
+          label: 'forked',
+          data: { kind: 'fork' as const },
+        };
+      })
+      .filter((e): e is NonNullable<typeof e> => e !== null);
+
+    setRfEdges([...branchEdges, ...forkEdges]);
+  }, [specs, forkSources]);
 
   useEffect(() => {
     if (rfNodes.length > 0 && !didFitRef.current) {
