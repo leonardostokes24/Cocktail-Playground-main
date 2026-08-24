@@ -37,7 +37,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     loadSpecs, loadSpecCosts, loadIngredients, loadAllSpecComponents,
     createSpec, editSpec, selectSpec, branchSpec, attachBranch,
     removeSpecs, duplicateSpecs, tidySpecs, publishSpecs,
-    activeFormulaId, forkSources, loadForkSources, layoutNonce,
+    activeFormulaId, forkSources, loadForkSources, loadSpecGroups, layoutNonce,
   } = useProofStore(useShallow(state => ({
     specs: state.specs,
     specsLoading: state.specsLoading,
@@ -59,6 +59,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     layoutNonce: state.layoutNonce,
     forkSources: state.forkSources,
     loadForkSources: state.loadForkSources,
+    loadSpecGroups: state.loadSpecGroups,
   })));
 
   const [showLibrary, setShowLibrary] = useState(false);
@@ -98,7 +99,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
   useEffect(() => {
     if (!user) return;
-    loadSpecs().then(() => { loadSpecCosts(); loadForkSources(); });
+    loadSpecs().then(() => { loadSpecCosts(); loadForkSources(); loadSpecGroups(); });
     loadIngredients();
     loadAllSpecComponents();
   }, [user?.id]);
@@ -551,6 +552,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {canvasMode === 'canvas' && user && <SelectionMenu
           onNewSpec={handleNewSpec}
+          selectedIds={selectedIds}
           onOpenRecipe={(o) => { setPanelOpen(true); setPanelBuilder(!!o?.builder); }}
           summon={summon}
         />}

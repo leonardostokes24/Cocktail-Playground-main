@@ -20,7 +20,7 @@ import { computeSpecCosts } from '../../utils/calculations';
  */
 
 type ActionId =
-  | 'branch' | 'add' | 'tidy' | 'open'
+  | 'branch' | 'add' | 'group' | 'open'
   | 'duplicate' | 'to-prep' | 'publish' | 'delete';
 
 type Action = {
@@ -34,7 +34,9 @@ type Action = {
 const ACTIONS: Action[] = [
   { id: 'branch',    label: 'Branch' },
   { id: 'add',       label: 'Add component' },
-  { id: 'tidy',      label: 'Tidy lineage' },
+  // Tidy lives in the dock; this slot carries the one thing the canvas can't
+  // derive for you — a group you meant.
+  { id: 'group',     label: 'New group' },
   { id: 'open',      label: 'Open recipe' },
   { id: 'duplicate', label: 'Duplicate' },
   { id: 'to-prep',   label: 'Convert to prep' },
@@ -51,12 +53,14 @@ export type Summon = { x: number; y: number; nonce: number };
 
 interface Props {
   onNewSpec: () => void;
+  /** Canvas selection, so "New group" can gather more than the menu's target. */
+  selectedIds: string[];
   /** 'Open recipe' is the only route to the full editing panel now. */
   onOpenRecipe: (opts?: { builder?: boolean }) => void;
   summon: Summon | null;
 }
 
-export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props) {
+export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon, selectedIds }: Props) {
   const specs        = useProofStore(s => s.specs);
   const selectedId   = useProofStore(s => s.selectedSpecId);
   const selectSpec   = useProofStore(s => s.selectSpec);
@@ -64,7 +68,7 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
   const publishSpec  = useProofStore(s => s.publishSpec);
   const removeSpec   = useProofStore(s => s.removeSpec);
   const duplicate    = useProofStore(s => s.duplicateSpecs);
-  const tidySpecs    = useProofStore(s => s.tidySpecs);
+  const createGroupFrom = useProofStore(s => s.createGroupFrom);
   const ingredients  = useProofStore(s => s.ingredients);
   const recentIds    = useProofStore(s => s.recentIngredientIds);
   const componentsMap = useProofStore(s => s.specComponentsMap);
@@ -87,6 +91,7 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
   const [amount, setAmount] = useState('30');
   const [unit, setUnit] = useState('ml');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pinned, setPinned] = useState<{ x: number; y: number } | null>(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) ?? 'null'); } catch { return null; }
@@ -213,13 +218,19 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
     if (a.id === 'delete' && !confirmDelete) { setConfirmDelete(true); return; }
 
     setBusy(true);
+    setError(null);
     try {
       switch (a.id) {
         case 'branch':    await branchSpec(spec.id); break;
         case 'open':      selectSpec(spec.id); onOpenRecipe(); break;
         case 'add':       selectSpec(spec.id); onOpenRecipe({ builder: true }); break;
         case 'duplicate': await duplicate([spec.id]); break;
-        case 'tidy':      await tidySpecs([]); break;   // whole canvas
+        case 'group': {
+          // Group the whole selection if there is one, otherwise just this spec.
+          const ids = selectedIds.length ? selectedIds : [spec.id];
+          await createGroupFrom(ids, spec.name);
+          break;
+        }
         case 'to-prep': {
           // A prep is a batch, so its yield is the spec's finished volume —
           // dilution included, because that is what actually ends up in the jar.
@@ -253,13 +264,18 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
         case 'publish':   await publishSpec(spec.id); break;
         case 'delete':    await removeSpec(spec.id); break;
       }
-    } finally {
+    } catch (err) {
+      // An action that fails must say so — closing silently reads as "done".
+      setError(err instanceof Error ? err.message : 'That action failed');
       setBusy(false);
+      return;
+    } finally {
       setConfirmDelete(false);
-      setQuery('');
-      setOpen(false);
     }
-  }, [spec, specs, busy, confirmDelete, branchSpec, selectSpec, duplicate, tidySpecs, componentsMap,
+    setBusy(false);
+    setQuery('');
+    setOpen(false);
+  }, [spec, specs, busy, confirmDelete, branchSpec, selectSpec, duplicate, createGroupFrom, selectedIds, componentsMap,
       dilution, sundries, wasteRate, addPrep, addPrepComponent, publishSpec, removeSpec, onNewSpec, onOpenRecipe]);
 
   const q = query.trim().toLowerCase();
@@ -406,12 +422,12 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
             <button
               key={a.id}
               onClick={() => run(a)}
-              disabled={a.soon || busy || (!spec && a.id !== 'branch' && a.id !== 'tidy')}
+              disabled={a.soon || busy || (!spec && a.id !== 'branch')}
               title={a.soon ? 'Not built yet' : undefined}
               style={cell(i, matches.length, {
                 accent: a.accent,
                 soon: a.soon,
-                inert: !spec && a.id !== 'branch' && a.id !== 'tidy',
+                inert: !spec && a.id !== 'branch',
                 armed: isDeleteArmed,
               })}
             >
@@ -424,6 +440,8 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
           );
         })}
       </div>
+
+      {error && <div style={errorRow}>{error}</div>}
 
       <div style={footer}>
         {pending ? '↵ to add · esc to go back'
@@ -599,6 +617,14 @@ const backBtn: React.CSSProperties = {
   padding: '7px 11px', background: 'none', color: 'var(--ink-72)',
   border: '1px solid var(--rule-strong)', borderRadius: 0,
   font: '400 12.5px/1 var(--font-display)', cursor: 'pointer',
+};
+
+const errorRow: React.CSSProperties = {
+  padding: '9px 15px',
+  borderTop: '1px solid var(--accent-line)',
+  background: 'rgba(194,42,6,.06)',
+  font: '400 11.5px/1.4 var(--font-display)',
+  color: 'var(--accent)',
 };
 
 const footer: React.CSSProperties = {

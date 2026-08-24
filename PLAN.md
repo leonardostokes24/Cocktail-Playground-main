@@ -20,6 +20,9 @@ within a day of each other. One file, one truth.
 
 `lint` 0 · **140 tests green** · `build` clean.
 
+**Migration 0008 is written but not applied.** Manual groups fail with a readable message
+until it runs: `psql "$DATABASE_URL" -f supabase/migrations/0008_spec_groups.sql`
+
 **Built and verified in the running app:** the lineage canvas with vertical top-to-bottom
 routing and orthogonal edges · branching and twist numbering · the capture menu (right-click /
 `⌘K`, type to act or search, amount entry, eight actions) · corner delete with detach warnings

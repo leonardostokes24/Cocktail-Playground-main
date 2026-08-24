@@ -1,5 +1,9 @@
 import { create } from 'zustand';
 import type { RecipeDraft } from '../utils/ingestion';
+import {
+  listSpecGroups, createSpecGroup, deleteSpecGroup, setSpecGroup, renameSpecGroup,
+  type SpecGroup,
+} from '../lib/supabase/groups';
 import { toMl } from '../utils/units';
 import { placeChild, placeRoot, tidyTree } from '../utils/layout';
 import { persist } from 'zustand/middleware';
@@ -170,6 +174,14 @@ interface ProofState {
   lineageLoadingId: string | null;
   loadLineage: (publishedId: string) => Promise<void>;
   /** published_id -> the snapshot a spec was forked from, for fork edges + badges. */
+  /** Manual groups (0008) — deliberate sets, unlike the derived lineage hulls. */
+  specGroups: SpecGroup[];
+  loadSpecGroups: () => Promise<void>;
+  createGroupFrom: (specIds: string[], name?: string) => Promise<SpecGroup | null>;
+  renameGroup: (groupId: string, name: string) => Promise<void>;
+  /** Removes the container, never the contents. */
+  ungroup: (groupId: string) => Promise<void>;
+  addToGroup: (specIds: string[], groupId: string | null) => Promise<void>;
   forkSources: Record<string, ForkSource>;
   loadForkSources: () => Promise<void>;
   // Fork several published specs onto the canvas at once, laid out on a grid.
@@ -666,6 +678,39 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
     // never appears until the next full reload.
     await get().loadForkSources();
     return newSpec;
+  },
+  specGroups: [],
+  loadSpecGroups: async () => {
+    set({ specGroups: await listSpecGroups() });
+  },
+  createGroupFrom: async (specIds, name) => {
+    const group = await createSpecGroup(name?.trim() || 'Group');
+    if (specIds.length) await setSpecGroup(specIds, group.id);
+    set((s) => ({
+      specGroups: [...s.specGroups, group],
+      specs: s.specs.map((sp) => (specIds.includes(sp.id) ? { ...sp, group_id: group.id } : sp)),
+    }));
+    return group;
+  },
+  renameGroup: async (groupId, name) => {
+    await renameSpecGroup(groupId, name);
+    set((s) => ({ specGroups: s.specGroups.map((g) => (g.id === groupId ? { ...g, name } : g)) }));
+  },
+  ungroup: async (groupId) => {
+    // group_id is ON DELETE SET NULL, so the specs survive — mirror that locally
+    // or the canvas keeps drawing a hull for a group that no longer exists.
+    await deleteSpecGroup(groupId);
+    set((s) => ({
+      specGroups: s.specGroups.filter((g) => g.id !== groupId),
+      specs: s.specs.map((sp) => (sp.group_id === groupId ? { ...sp, group_id: null } : sp)),
+    }));
+  },
+  addToGroup: async (specIds, groupId) => {
+    if (!specIds.length) return;
+    await setSpecGroup(specIds, groupId);
+    set((s) => ({
+      specs: s.specs.map((sp) => (specIds.includes(sp.id) ? { ...sp, group_id: groupId } : sp)),
+    }));
   },
   forkSources: {},
   loadForkSources: async () => {

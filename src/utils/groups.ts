@@ -11,9 +11,11 @@ import type { Spec } from '../lib/supabase/queries';
  */
 
 export type Group = {
+  /** Derived groups key on their root spec; manual groups on their group row. */
   rootId: string;
   name: string;
   specIds: string[];
+  kind: 'lineage' | 'manual';
 };
 
 const cache = new WeakMap<Spec[], Group[]>();
@@ -29,6 +31,29 @@ function rootOf(spec: Spec, byId: Map<string, Spec>): Spec {
     cur = parent;
   }
   return cur;
+}
+
+/**
+ * Manual groups: sets the user gathered on purpose (migration 0008).
+ *
+ * Unlike a lineage group, a manual group of one is still a group — somebody
+ * said so — so the single-member rule doesn't apply here.
+ */
+export function manualGroupsOf(
+  specs: Spec[],
+  groups: { id: string; name: string }[],
+): Group[] {
+  if (!groups.length) return [];
+  const members = new Map<string, string[]>();
+  for (const spec of specs) {
+    if (!spec.group_id) continue;
+    const bucket = members.get(spec.group_id);
+    if (bucket) bucket.push(spec.id);
+    else members.set(spec.group_id, [spec.id]);
+  }
+  return groups
+    .filter(g => members.has(g.id))
+    .map(g => ({ rootId: g.id, name: g.name, specIds: members.get(g.id)!, kind: 'manual' as const }));
 }
 
 export function groupsOf(specs: Spec[]): Group[] {
@@ -49,7 +74,7 @@ export function groupsOf(specs: Spec[]): Group[] {
   for (const [rootId, specIds] of buckets) {
     // A lone spec is not a group — a hull around one card says nothing.
     if (specIds.length < 2) continue;
-    result.push({ rootId, name: byId.get(rootId)?.name ?? 'Lineage', specIds });
+    result.push({ rootId, name: byId.get(rootId)?.name ?? 'Lineage', specIds, kind: 'lineage' });
   }
 
   cache.set(specs, result);

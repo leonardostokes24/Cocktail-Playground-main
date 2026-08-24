@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNodes, useReactFlow, useViewport } from '@xyflow/react';
 import { useProofStore } from '../../store/useProofStore';
-import { groupsOf } from '../../utils/groups';
+import { groupsOf, manualGroupsOf } from '../../utils/groups';
 
 /**
  * Ghost groups: a hull behind each lineage family.
@@ -22,6 +22,8 @@ export default function GroupLayer() {
   const specs = useProofStore(s => s.specs);
   const editSpec = useProofStore(s => s.editSpec);
   const removeSpecs = useProofStore(s => s.removeSpecs);
+  const specGroups = useProofStore(s => s.specGroups);
+  const ungroup = useProofStore(s => s.ungroup);
   const nodes = useNodes();
   const { setNodes } = useReactFlow();
   const { x, y, zoom } = useViewport();
@@ -78,8 +80,13 @@ export default function GroupLayer() {
     window.addEventListener('pointerup', up);
   }, [zoom, setNodes, editSpec]);
 
-  /** Two-step, like the card corner. Deleting a group takes the whole family. */
-  const handleDelete = useCallback(async (e: React.MouseEvent, rootId: string, ids: string[]) => {
+  /**
+   * Two-step, like the card corner — but what it does depends on the kind.
+   * A manual group is a container: removing it must not remove the drinks.
+   * A lineage hull isn't a container, it *is* the family, so there is nothing
+   * to dissolve and the only meaningful destructive action is deleting them.
+   */
+  const handleDelete = useCallback(async (e: React.MouseEvent, rootId: string, ids: string[], kind: 'lineage' | 'manual') => {
     e.preventDefault();
     e.stopPropagation();
     if (busy) return;
@@ -92,15 +99,17 @@ export default function GroupLayer() {
     clearTimeout(disarmTimer.current);
     setBusy(true);
     try {
-      await removeSpecs(ids);
+      if (kind === 'manual') await ungroup(rootId);
+      else await removeSpecs(ids);
       setArmed(null);
     } finally {
       setBusy(false);
     }
-  }, [armed, busy, removeSpecs]);
+  }, [armed, busy, removeSpecs, ungroup]);
 
   const hulls = useMemo(() => {
-    const groups = groupsOf(specs);
+    // Manual groups first, so a deliberate set draws over the family it sits in.
+    const groups = [...groupsOf(specs), ...manualGroupsOf(specs, specGroups)];
     if (!groups.length) return [];
 
     const byId = new Map(nodes.map(n => [n.id, n]));
@@ -120,19 +129,21 @@ export default function GroupLayer() {
         maxY = Math.max(maxY, n.position.y + h);
         seen++;
       }
-      if (seen < 2) return [];
+      // A lineage hull needs two cards to mean anything; a manual one doesn't.
+      if (seen < (g.kind === 'manual' ? 1 : 2)) return [];
       return [{
         id: g.rootId,
         name: g.name,
         count: g.specIds.length,
         specIds: g.specIds,
+        kind: g.kind,
         left: minX - PAD,
         top: minY - PAD - LABEL_H,
         width: (maxX - minX) + PAD * 2,
         height: (maxY - minY) + PAD * 2 + LABEL_H,
       }];
     });
-  }, [specs, nodes]);
+  }, [specs, nodes, specGroups]);
 
   if (!hulls.length) return null;
 
@@ -143,26 +154,30 @@ export default function GroupLayer() {
           <div
             key={h.id}
             className="nodrag nopan"
-            style={{ ...(dragging === h.id ? hullDragging : hull), left: h.left, top: h.top, width: h.width, height: h.height }}
+            style={{ ...(dragging === h.id ? hullDragging : hull),
+                     ...(h.kind === 'manual' ? hullManual : null),
+                     left: h.left, top: h.top, width: h.width, height: h.height }}
             onPointerDown={e => startDrag(e, h.specIds, h.id)}
             title="Drag to move the whole family"
           >
-            <div style={label}>
+            <div style={h.kind === 'manual' ? labelManual : label}>
               <span style={grip} aria-hidden="true">⠿</span>
               <span style={nameStyle}>{h.name}</span>
               <span style={countStyle}>{String(h.count).padStart(2, '0')}</span>
               <button
                 type="button"
-                onClick={e => handleDelete(e, h.id, h.specIds)}
+                onClick={e => handleDelete(e, h.id, h.specIds, h.kind)}
                 onPointerDown={e => e.stopPropagation()}
                 disabled={busy}
                 style={del(armed === h.id)}
-                aria-label={armed === h.id
-                  ? `Confirm delete all ${h.count} specs in ${h.name}`
-                  : `Delete the ${h.name} family`}
-                title={armed === h.id ? `Deletes all ${h.count} specs` : 'Delete this family'}
+                aria-label={h.kind === 'manual'
+                  ? (armed === h.id ? `Confirm ungroup ${h.name} — the ${h.count} specs stay` : `Ungroup ${h.name}`)
+                  : (armed === h.id ? `Confirm delete all ${h.count} specs in ${h.name}` : `Delete the ${h.name} family`)}
+                title={h.kind === 'manual'
+                  ? 'Remove the group — the drinks stay'
+                  : (armed === h.id ? `Deletes all ${h.count} specs` : 'Delete this family')}
               >
-                {armed === h.id ? `delete ${h.count}?` : '✕'}
+                {armed === h.id ? (h.kind === 'manual' ? 'ungroup?' : `delete ${h.count}?`) : '✕'}
               </button>
             </div>
           </div>
@@ -198,6 +213,34 @@ const hull: React.CSSProperties = {
   // family and a press on a card still reaches the card.
   pointerEvents: 'auto',
   cursor: 'grab',
+};
+
+/* A manual group is deliberate, so it draws as a solid enclosure — a derived
+   family stays dashed, the way a suggestion should. */
+const hullManual: React.CSSProperties = {
+  border: '1px solid rgba(26,26,23,.42)',
+  background: 'rgba(194,42,6,.045)',
+};
+
+const labelManual: React.CSSProperties = {
+  position: 'absolute',
+  top: -1,
+  left: -1,
+  height: LABEL_H,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '0 9px',
+  background: 'var(--accent)',
+  border: '1px solid var(--accent)',
+  font: '400 10px/1 var(--font-mono)',
+  letterSpacing: '.08em',
+  color: 'var(--on-ink)',
+  whiteSpace: 'nowrap',
+  maxWidth: '100%',
+  overflow: 'hidden',
+  pointerEvents: 'auto',
+  userSelect: 'none',
 };
 
 const hullDragging: React.CSSProperties = {

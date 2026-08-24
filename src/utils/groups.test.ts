@@ -7,7 +7,7 @@ function spec(id: string, parent: string | null, name = id): Spec {
     id, user_id: 'u1', name, parent_spec_id: parent,
     forked_from_published_id: null, change_note: null, method: null, glass: null,
     garnish: null, build_text: null, sale_price: null, status: 'draft',
-    visibility: 'private', published_recipe_id: null, canvas_x: 0, canvas_y: 0,
+    visibility: 'private', group_id: null, published_recipe_id: null, canvas_x: 0, canvas_y: 0,
     created_at: '2026-01-01', updated_at: '2026-01-01',
   };
 }

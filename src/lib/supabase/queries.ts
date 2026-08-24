@@ -86,6 +86,8 @@ export type Spec = {
   sale_price: number | null;
   status: 'draft' | 'published';
   visibility: 'private' | 'published';
+  /** Manual group membership (0008). Independent of lineage. */
+  group_id: string | null;
   published_recipe_id: string | null;
   canvas_x: number;
   canvas_y: number;
@@ -105,6 +107,7 @@ export type SpecInput = {
   sale_price?: number | null;
   status?: 'draft' | 'published';
   visibility?: 'private' | 'published';
+  group_id?: string | null;
   canvas_x?: number;
   canvas_y?: number;
 };
