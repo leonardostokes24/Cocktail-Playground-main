@@ -108,10 +108,10 @@ venue can be created and joined; immutability trigger proven.
       `websearch_to_tsquery` search (⚑). Not a feed — just find-to-fork. Attribution
       (creator + venue) on every card, always.
       → `CommonsPanel.tsx`, websearch_to_tsquery
-- [~] Fork: new private spec, `forked_from_published_id` set; components resolved against the
+- [x] Fork: new private spec, `forked_from_published_id` set; components resolved against the
       user's own ingredients — prompt to import + price anything missing. Distinct edge style
       for fork vs branch on canvas.
-      → fork + auto-resolve to own ingredients works; **fork vs branch edges are not styled differently** — edges are built from `parent_spec_id` only
+      → fork + auto-resolve done; fork edges now dashed magenta vs solid branch, and off-canvas fork sources carry a FORK badge instead of a dangling edge
 - [x] **All lineage display goes through `get_spec_lineage()` RPC (⚑)** — never a client-side
       walk. Show ancestry to root + descendants on a published spec.
 - [x] Delete guard: block deleting a published spec with existing forks; human message

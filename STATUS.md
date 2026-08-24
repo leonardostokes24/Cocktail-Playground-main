@@ -72,7 +72,7 @@ going too.
 
 ## What's left
 
-`PLAN.md` has now been reconciled against the code — **26 done, 7 partial, 5 open, 1 blocked**.
+`PLAN.md` has now been reconciled against the code — **27 done, 6 partial, 5 open, 1 blocked**.
 Every partial or open task carries a `→` line saying exactly what is missing.
 
 ### Built this pass
@@ -83,6 +83,7 @@ Every partial or open task carries a `→` line saying exactly what is missing.
 | **Paste-a-recipe ingestion** | `src/utils/ingestion.ts` + `IngestPanel.tsx` — the pad's *Ingest* action is live |
 | **Catalogue browse + import** | `CatalogueSearch.tsx`, reachable from the Cost Library |
 | **Venues** | `lib/supabase/venues.ts` + `VenuePanel.tsx` — create / join / leave |
+| **Fork vs branch edges** | Dashed magenta fork edge vs solid branch; `FORK` badge for off-canvas sources |
 
 Two deliberate deviations, both flagged rather than silent:
 
@@ -98,8 +99,6 @@ Two deliberate deviations, both flagged rather than silent:
 
 - **Unpublish** — flips `specs.visibility` only, with copy explaining the snapshot persists for
   forks. Not built.
-- **Fork vs branch edges** are not styled differently; edges are still built from
-  `parent_spec_id` alone.
 - **Recents-first** in the pad's search was never implemented.
 - **The pad's search doesn't query the catalogue** — own ingredients and preps only.
 - **No test proves the `published_specs` immutability trigger rejects an UPDATE.**
