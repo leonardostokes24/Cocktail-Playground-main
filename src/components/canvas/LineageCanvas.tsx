@@ -13,6 +13,7 @@ import SpecNodeComponent from './SpecNode';
 import GradientEdge from '../CustomEdge';
 import IngredientLibrary from '../library/IngredientLibrary';
 import PrepLibrary from '../library/PrepLibrary';
+import IngestPanel from '../library/IngestPanel';
 import SpecPanel from '../spec/SpecPanel';
 import SettingsPanel from '../spec/SettingsPanel';
 import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
@@ -58,6 +59,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
   const [showLibrary, setShowLibrary] = useState(false);
   const [showPreps, setShowPreps] = useState(false);
+  const [showIngest, setShowIngest] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
@@ -489,6 +491,9 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       {/* ── Panels & menus ───────────────────────────────────── */}
       {showLibrary && <IngredientLibrary onClose={() => setShowLibrary(false)} />}
       {showPreps && <PrepLibrary onClose={() => setShowPreps(false)} />}
+      {showIngest && (
+        <IngestPanel onClose={() => setShowIngest(false)} onDone={(id) => selectSpec(id)} />
+      )}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {selectedSpecId && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
       {canvasMode === 'commons' && <CommonsPanel onClose={() => setCanvasMode('canvas')} />}
@@ -499,6 +504,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           onClose={() => setRadialCtx(null)}
           onOpenLibrary={() => setShowLibrary(true)}
           onOpenPreps={() => setShowPreps(true)}
+          onOpenIngest={() => setShowIngest(true)}
         />
       )}
       {radialCtx && menuMode === 'list' && (

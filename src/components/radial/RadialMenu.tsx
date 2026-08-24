@@ -21,6 +21,7 @@ interface Props {
   onClose: () => void;
   onOpenLibrary?: () => void;
   onOpenPreps?: () => void;
+  onOpenIngest?: () => void;
 }
 
 // ── Segment definitions ───────────────────────────────────────────────────────
@@ -29,7 +30,7 @@ const CANVAS_SEGMENTS: Segment[] = [
   { id: 'new-spec',     label: 'New spec',  icon: 'spark' },
   { id: 'search-lib',   label: 'Library',   icon: 'library' },
   { id: 'new-prep',     label: 'Preps',     icon: 'flask' },
-  { id: 'quick-ingest', label: 'Ingest',    icon: 'ingest', disabled: true },
+  { id: 'quick-ingest', label: 'Ingest',    icon: 'ingest' },
 ];
 
 const NODE_SEGMENTS: Segment[] = [
@@ -65,7 +66,7 @@ const LABEL_FOR: Record<string, string> = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPreps }: Props) {
+export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPreps, onOpenIngest }: Props) {
   const [phase, setPhase] = useState<Phase>({ tag: 'main' });
   const [amount, setAmount] = useState('30');
   const [unit, setUnit] = useState('ml');
@@ -121,7 +122,8 @@ export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPrep
     }
     if (id === 'search-lib') { onOpenLibrary?.(); onClose(); return; }
     if (id === 'new-prep')   { onOpenPreps?.();   onClose(); return; }
-  }, [specs, createSpec, onClose, onOpenLibrary, onOpenPreps]);
+    if (id === 'quick-ingest') { onOpenIngest?.(); onClose(); return; }
+  }, [specs, createSpec, onClose, onOpenLibrary, onOpenPreps, onOpenIngest]);
 
   // ── Node ring handlers ────────────────────────────────────────────────────
   const handleNodeSelect = useCallback(async (id: string) => {

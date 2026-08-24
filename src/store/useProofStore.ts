@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import type { RecipeDraft } from '../utils/ingestion';
+import { toMl } from '../utils/units';
 import { persist } from 'zustand/middleware';
 import { DILUTION_DEFAULTS } from '../utils/calculations';
 import { DEFAULT_FORMULA_ID } from '../utils/formulaRegistry';
@@ -106,6 +108,8 @@ interface ProofState {
   componentsLoading: boolean;
   loadSpecComponents: (specId: string) => Promise<void>;
   addComponent: (input: SpecComponentInput) => Promise<void>;
+  /** Paste-a-recipe on-ramp: draft -> real spec + components. */
+  ingestRecipe: (draft: RecipeDraft, at?: { x: number; y: number }) => Promise<Spec>;
   editComponent: (id: string, input: Partial<Pick<SpecComponentInput, 'amount_ml' | 'original_amount' | 'original_unit' | 'position'>>) => Promise<void>;
   removeComponent: (id: string) => Promise<void>;
 
@@ -409,6 +413,47 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
         [comp.spec_id]: [...(s.specComponentsMap[comp.spec_id] ?? []), comp],
       },
     }));
+  },
+
+  ingestRecipe: async (draft, at) => {
+    const spec = await get().createSpec({
+      name: draft.name?.trim() || 'Pasted recipe',
+      method: draft.method,
+      glass: draft.glass,
+      garnish: draft.garnish,
+      canvas_x: at?.x ?? 120,
+      canvas_y: at?.y ?? 160,
+    });
+
+    // Match names against the user's own library first. Anything unknown is
+    // created unpriced — pricing is optional, and inventing a cost here would
+    // put a number the user never entered into their GP.
+    for (const [i, c] of draft.components.entries()) {
+      const existing = get().ingredients.find(
+        (ing) => ing.name.toLowerCase() === c.name.toLowerCase(),
+      );
+      let ingredientId = existing?.id;
+      if (!ingredientId) {
+        await get().addIngredient({ name: c.name, type: null, abv: 0, pack_size_ml: 700, pack_cost: null });
+        ingredientId = get().ingredients.find(
+          (ing) => ing.name.toLowerCase() === c.name.toLowerCase(),
+        )?.id;
+      }
+      if (!ingredientId) continue;
+
+      await get().addComponent({
+        spec_id: spec.id,
+        ingredient_id: ingredientId,
+        prep_id: null,
+        amount_ml: toMl(c.amount, c.unit),
+        original_amount: c.amount,
+        original_unit: c.unit,
+        position: i,
+      });
+    }
+
+    await get().loadAllSpecComponents();
+    return spec;
   },
   editComponent: async (id, input) => {
     const updated = await updateSpecComponent(id, input);
