@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { placeRoot } from '../../utils/layout';
 import { useProofStore } from '../../store/useProofStore';
 import { UNITS } from '../../utils/units';
 import CommandPad, { PAD_SIZE, type Segment } from './CommandPad';
@@ -130,8 +131,8 @@ export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPrep
   // ── Canvas ring handlers ──────────────────────────────────────────────────
   const handleCanvasSelect = useCallback(async (id: string) => {
     if (id === 'new-spec') {
-      const x = specs.length ? Math.max(...specs.map(s => s.canvas_x)) + 280 : 100;
-      await createSpec({ name: 'New Spec', canvas_x: x, canvas_y: 200 });
+      const at = placeRoot(specs);
+      await createSpec({ name: 'New Spec', canvas_x: at.x, canvas_y: at.y });
       onClose();
       return;
     }

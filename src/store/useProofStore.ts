@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { RecipeDraft } from '../utils/ingestion';
 import { toMl } from '../utils/units';
+import { placeChild, placeRoot } from '../utils/layout';
 import { persist } from 'zustand/middleware';
 import { DILUTION_DEFAULTS } from '../utils/calculations';
 import { DEFAULT_FORMULA_ID } from '../utils/formulaRegistry';
@@ -340,6 +341,7 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
 
     const parentComponents = await listSpecComponents(parentId);
 
+    const slot = position ? { x: position.x, y: position.y } : placeChild(get().specs, parent);
     const child = await insertSpec({
       name: `${parent.name} (twist)`,
       parent_spec_id: parentId,
@@ -349,9 +351,10 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
       garnish: parent.garnish,
       build_text: parent.build_text,
       sale_price: parent.sale_price,
-      canvas_x: position ? position.x : parent.canvas_x + 300,
-      // Nodes are as tall as their recipe, so offset a twist generously to clear the parent.
-      canvas_y: position ? position.y : parent.canvas_y + 220,
+      // Drag-to-empty supplies its own point; otherwise place below the parent
+      // with siblings fanned sideways (see utils/layout).
+      canvas_x: position ? position.x : slot.x,
+      canvas_y: position ? position.y : slot.y,
     });
 
     const childComponents: SpecComponent[] = [];
@@ -440,8 +443,8 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
       method: draft.method,
       glass: draft.glass,
       garnish: draft.garnish,
-      canvas_x: at?.x ?? 120,
-      canvas_y: at?.y ?? 160,
+      canvas_x: at?.x ?? placeRoot(get().specs).x,
+      canvas_y: at?.y ?? placeRoot(get().specs).y,
     });
 
     // Match names against the user's own library first. Anything unknown is

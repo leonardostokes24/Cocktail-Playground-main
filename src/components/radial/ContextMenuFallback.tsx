@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { placeRoot } from '../../utils/layout';
 import type { RadialContext } from './RadialMenu';
 import { useProofStore } from '../../store/useProofStore';
 import { childCounts } from '../../utils/childCounts';
@@ -45,8 +46,8 @@ export default function ContextMenuFallback({
   }, [onClose, phase]);
 
   const handleNewSpec = useCallback(async () => {
-    const x = specs.length ? Math.max(...specs.map(s => s.canvas_x)) + 280 : 100;
-    await createSpec({ name: 'New Spec', canvas_x: x, canvas_y: 200 });
+    const at = placeRoot(specs);
+    await createSpec({ name: 'New Spec', canvas_x: at.x, canvas_y: at.y });
     onClose();
   }, [specs, createSpec, onClose]);
 
