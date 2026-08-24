@@ -1,158 +1,135 @@
-# PLAN.md — Proof Build Plan
+# PLAN.md — Proof
 
-**The when.** Read `VISION.md` (what/why) and `CLAUDE.md` (how — ⚑ rules are non-negotiable)
-before working any phase. If a task here contradicts them, they win; fix this file.
+**What's next, and where we actually are.** Read `VISION.md` for what and why, `CLAUDE.md` for
+the rules. If a task here contradicts either, they win — fix this file.
 
-## How to use this file
-- Top-down, one phase at a time; respect `Depends on`. Mark `[ ]→[~]→[x]`, `[!]` blocked+why.
-- A `→` line under a task is its current state, recorded when the plan was reconciled
-  against the code on 2026-08-24. See `STATUS.md` for the narrative version.
-- Gate every phase on: `npm run typecheck` 0 · `lint` clean · `test` green, plus the phase's
-  own benchmark gates below.
-- Each phase names the VISION Pillar(s) it serves. If a task doesn't serve one, cut it.
-- Ambiguous task → propose approach, ask, then code.
+Rewritten 2026-08-24. Replaces the old phase plan and `STATUS.md`, which had drifted apart
+within a day of each other. One file, one truth.
 
----
-
-## Phase 0 — Audit & consolidate
-**Pillars:** foundation for all. **Depends on:** nothing.
-A prior session built much of the two-layer model. Verify before building on it.
-
-- [x] Confirm the root mounts `LineageCanvas` + `SpecPanel`; screenshot.
-- [x] Delete dead pre-rebuild architecture: old root `SpecNode.tsx`, `IngredientNode.tsx`,
-      `ContainerNode.tsx`, old `RadialWheel.tsx`, `Sidebar.tsx`, `portShim/`. `tsc` catches
-      dead imports.
-- [x] 100% `.ts/.tsx` in `/src`; typecheck 0; tests green (~26 expected in calculations).
-- [x] `grep -rn "alert(\|prompt(\|confirm(" src/` → record debt list for Phase 5 (don't fix).
-      → zero hits; no debt to carry
-- [x] Remove confirmed-unused heavy deps (`three`, r3f, `motion`, `express`…) via depcheck.
-- [x] Confirm migration 0001 applied (tables, cost views, RLS live).
-- [~] **React Flow rules pass (⚑):** `SpecNode` memoized; handlers `useCallback`; store reads
-      via `useShallow` selectors; `onlyRenderVisibleElements` on; drag writes debounced.
-      Profile: 60fps drag at 100 seeded nodes. **This is a gate — fix before Phase 1.**
-      → rules all pass; the 60fps-at-100-nodes profile has never been run
-
-**Done when:** one render path, all-TS, green checks, 60fps at 100 nodes, written debt list.
-
-## Phase 1 — Money & formula registry
-**Pillars:** 3 (costing you can trust). **Depends on:** 0.
-
-- [x] `utils/money.ts`: decimal.js wrappers (⚑). Audit every cost path: no `Number()` on pg
-      numerics, no float math on money; round at display only.
-- [x] `utils/formulaRegistry.ts` per CLAUDE.md interface: `gp_ex_vat` (default),
-      `pour_cost_pct`, `cash_margin`, `markup`, `target_gp_price`, `target_pour_cost_price`.
-      → all six entries present
-- [x] `calculations.ts`: modifiers — sundries £/serve + waste% (default .05) applied before
-      formulas; verify dilution never touches cost.
-- [x] Settings slice (persisted): `vatRate` (default .20 — a setting, never a constant ⚑),
-      sundries, wasteRate, targetGP, rounding rule, dilution factors. Minimal settings panel.
-- [x] `SpecNode` headline gauge reads active registry entry; `SpecPanel` shows full breakdown —
-      every model + reverse-price suggestion vs `sale_price` — and realized-vs-target GP with
-      no editorial copy (targets are user-set ⚑).
-- [x] Tests: every registry entry incl. reverses, modifier chain, zero-cost/zero-price edges,
-      decimal string round-trips.
-
-**Done when:** switching active formula re-renders every node headline at once; tests green.
-
-## Phase 2 — Smart radial menu
-**Pillars:** 1 (speed of capture). **Depends on:** 1.
-
-- [x] `RadialMenu.tsx` + `RadialRing.tsx`: object-anchored, ≤8 segments (⚑), sub-rings beyond.
-      Right-click / long-press 300ms + drag-release (offset for finger occlusion) / hotkey.
-      → RadialRing superseded by `CommandPad.tsx` — a 3×3 grid, same fixed-direction property
-- [x] Context rings exactly per CLAUDE.md (canvas / spec node / component).
-- [x] Ingredient sub-ring: 8 categories matching `catalogue_ingredients.type`.
-- [x] `RadialSearch.tsx`: centre type-ahead, 200ms debounce, user ingredients only for now
-      (catalogue + commons wired in Phases 3–4); recents first.
-      → 200ms debounce, recents-first (last 12), catalogue appended and imported unpriced on the way in
-- [x] Inline confirm segment for Delete (no modal); full keyboard navigation.
-      → confirmations also name detaching twists
-- [~] **`ContextMenuFallback.tsx` + first-run onboarding hints (⚑)** — same actions,
-      conventional menu; radials are fast but hard to learn.
-      → fallback has parity; first-run hints are now off by default since forcing them hid the radial entirely
-- [!] Test long-press on a real tablet or BrowserStack at 768px.
-      → blocked — needs a physical device or BrowserStack; only synthetic pointer events so far
-
-**Done when:** VISION success test — spec + three ingredients via radial only — passes on
-desktop and tablet, and the fallback menu offers every radial action.
-
-## Phase 3 — Social schema & community catalogue
-**Pillars:** 5 (commons), 3 (catalogue/override split). **Depends on:** 1.
-
-- [x] Apply 0002 + **0003**. Verify: tables/views live; `published_specs` UPDATE rejected by
-      trigger (test it); `get_spec_lineage()` executes as authenticated.
-      → migrations 0002–0007 applied; `supabase/tests/immutability.sql` proves the trigger — needs DB creds to run
-- [x] `queries/catalogue.ts` + `CatalogueSearch.tsx`: search shared catalogue; Import creates
-      user's own `ingredients` row (`catalogue_id` set) and **prompts for their price**
-      (reference_price is an editable suggestion, never silently used ⚑).
-      → `CatalogueSearch.tsx` built; reference_price shown as prose, never pre-filled into the price box
-- [x] Test asserting `reference_price` never appears in `spec_costs`/`prep_costs` output.
-      → `referencePrice.test.ts` — behavioural + structural (grep) guard
-- [x] `queries/venues.ts` + minimal venue UI (create/join/leave; no profile pages — deferred).
-      → `lib/supabase/venues.ts` + `VenuePanel.tsx`; last-owner-leaving blocked
-- [x] Radial centre search now also queries the catalogue.
-      → entries you don't own are appended and imported unpriced
-
-**Done when:** two users importing the same catalogue entry get different `cost_per_ml`; a
-venue can be created and joined; immutability trigger proven.
-
-## Phase 4 — Publish & fork (the v1 headline)
-**Pillars:** 2 (lineage spine), 5 (commons). **Depends on:** 2 + 3.
-
-- [x] Publish (from radial): snapshot → `published_specs` (`components_snapshot` JSONB),
-      set `visibility/published_at/published_spec_id`. New version = new row, always (⚑).
-- [x] Unpublish: flips `specs.visibility` only; UI copy explains the snapshot persists for
-      forks' ancestry.
-      → two-step confirm; copy states the snapshot persists for forks' ancestry
-- [x] `PublicBrowse`: search-first surface on `public_specs_feed` + weighted
-      `websearch_to_tsquery` search (⚑). Not a feed — just find-to-fork. Attribution
-      (creator + venue) on every card, always.
-      → `CommonsPanel.tsx`, websearch_to_tsquery
-- [x] Fork: new private spec, `forked_from_published_id` set; components resolved against the
-      user's own ingredients — prompt to import + price anything missing. Distinct edge style
-      for fork vs branch on canvas.
-      → fork + auto-resolve done; fork edges now dashed magenta vs solid branch, and off-canvas fork sources carry a FORK badge instead of a dangling edge
-- [x] **All lineage display goes through `get_spec_lineage()` RPC (⚑)** — never a client-side
-      walk. Show ancestry to root + descendants on a published spec.
-- [x] Delete guard: block deleting a published spec with existing forks; human message
-      ("N bartenders have forked this").
-      → handled at schema level: `published_specs.spec_id` is ON DELETE SET NULL and `forked_from_id` is ON DELETE RESTRICT, so forks cannot break. Node delete now warns about *detaching twists*, which was the real gap
-- [x] `export.ts`: spec → PDF/Excel (flat component list; straightforward).
-      → PDF via jsPDF (dynamically imported); **CSV instead of .xlsx** — npm's SheetJS is stuck at 0.18.5 with an unpatched advisory
-
-**Done when:** with two test accounts — publish, find via search, fork, edit the fork —
-ancestry stays complete via the RPC and attribution survives every step.
-
-## Phase 5 — Anti-clunk hardening & ship
-**Pillars:** all. **Depends on:** 4.
-
-- [x] Clear the Phase 0 alert/confirm debt with real in-app UI.
-      → zero hits, re-checked
-- [~] Run the **full CLAUDE.md anti-clunk checklist**; fix every failure.
-      → automated items all pass (zero alert/confirm, memoised node, virtualisation on, debounced drag writes, no animated backdrop-filter, AA contrast). The two device-bound items below are what remain.
-- [x] Glass audit (⚑): glass on small surfaces only; nothing animates backdrop-filter; solid
-      fallback via `@supports`; `prefers-reduced-transparency` and `-motion` honoured; AA
-      contrast on node text over the brightest and darkest blooms.
-      → @supports fallback added; contrast measured on pad + nodes; reduced-motion/-transparency blocks present
-- [ ] Touch pass at 768/1024px: 44px targets, long-press radial, pinch/pan intact.
-- [ ] Perf pass: 60fps drag at 100+ nodes, no full-array rebuild on select, debounced writes.
-- [x] Ingestion on-ramp (`ingestion.ts`): paste a recipe → draft spec (v1 scope; no AI beyond).
-      → deterministic parser, no AI; pad's Ingest action now enabled
-- [~] `npm run build` clean; smoke-test production on Vercel.
-      → `vite build` is clean; not smoke-tested on Vercel
-
-**Done when:** a cold demo on a fresh account — radial-create → cost → switch formula →
-publish → (second account) search → fork — runs end-to-end with no traditional form beyond
-search/settings, on a tablet.
+## How to use this
+- Milestones run in order. Each is gated on `lint` 0 · `test` green · `build` clean, plus its
+  own condition.
+- Mark `[ ] → [~] → [x]`, `[!]` blocked with the reason.
+- A `→` line under a task is its current state. Keep it true or delete it.
+- **Everything here is ordered by one sentence:** *one working bartender uses Proof for a week
+  with their own drinks, and comes back.*
 
 ---
 
-## Already built (verify in Phase 0, don't rebuild)
-`calculations.ts` + `units.ts` (~26 tests — extend, don't replace), `useProofStore`,
-supabase client/queries, `IngredientLibrary`, `LineageCanvas`, `SpecNode`, `SpecPanel` +
-sub-components, optional mini-canvas (nice-to-have; not a blocker).
+## Where we are
 
-## Explicitly deferred — stop and flag rather than build
-Ratings/comments, follows, discovery feed, venue profiles, moderation/reputation (0002's
-`verified` columns exist — leave unused), monetisation, AI beyond ingestion, nested preps,
-POS/inventory anything.
+`lint` 0 · **131 tests green** · `build` clean.
+
+**Built and verified in the running app:** the lineage canvas with vertical top-to-bottom
+routing and orthogonal edges · branching and twist numbering · the capture menu (right-click /
+`⌘K`, type to act or search, amount entry, eight actions) · corner delete with detach warnings
+· paper identity throughout · derived lineage groups, draggable and deletable · ingestion
+(paste a recipe → spec) · catalogue browse and import · export to PDF and CSV · publish,
+unpublish and fork with cross-creator lineage through the RPC · preps · venues (panel only).
+
+**Built but never proven:** the two-account commons round trip · touch and long-press on real
+hardware · 60fps at 100+ nodes · reduced-motion rendering · anything on a deployed build.
+
+### Known broken
+- **`Tidy` does not move nodes.** The canvas preserves React Flow's live positions across a
+  rebuild, so store position writes never reach the screen. A `layoutNonce` meant to make the
+  rebuild take stored coordinates is wired through and still has no effect. Predates the menu —
+  it has never worked from the dock either.
+
+### Repo state
+Three branches form a **linear stack**, so consolidation needs no cherry-picking:
+`master` → `feat/iba-commons-seed` (+22, PR #1 open) → `feat/vertical-ghost-groups` (+24,
+never pushed) → `feat/proof-new-ui` (+32, contains everything).
+`origin/main` also exists alongside `origin/master`; which is canonical is unresolved.
+
+---
+
+## M0 — Consolidate
+**Done when:** one trunk, docs true against it, nothing known-broken merged in silence.
+
+- [ ] Fix `Tidy`, or remove it from the dock. Shipping a control that does nothing violates
+      CLAUDE.md's last DO-NOT.
+- [ ] Merge `feat/proof-new-ui` to `master`; close PR #1 as subsumed.
+- [ ] Resolve `origin/main` vs `origin/master`.
+- [ ] Delete the two retired branches. Delete `STATUS.md`.
+- [ ] Re-verify the three docs against merged `master`.
+
+## M1 — Deploy
+**Done when:** a stranger can reach it, sign in, and see a seeded commons.
+
+- [ ] **Resolve `GEMINI_API_KEY` first.** `vite.config.ts` inlines it into the client bundle;
+      anything public exposes it. Move it behind a function or remove it.
+- [ ] Vercel project, environment variables, production Supabase.
+- [ ] Apply migrations 0004–0007 in order; run `supabase/tests/immutability.sql`.
+- [ ] Smoke-test the production build — never done.
+      → needs credentials only the owner has.
+
+## M2 — First run
+**Done when:** a new account lands somewhere it understands and can act from.
+
+- [ ] A seeded example lineage on an empty canvas — one drink, one twist, one fork, so
+      branching explains itself.
+- [ ] The empty state is an invitation, not a dead end.
+- [ ] One pass that teaches the menu without a tour: right-click, type, enter.
+
+## M3 — The pricing workflow ⚑
+**Done when:** GP is trustworthy without anyone doing invisible data entry.
+
+This is the pillar the app currently claims and does not honour. Ingredients arrive unpriced
+from ingestion and from the catalogue, GP reads `unpriced`, and nothing ever asks.
+
+- [ ] Surface what's unpriced, at the point it costs you the number — not in a settings screen.
+- [ ] Price several ingredients in one pass; a spec should become costed in one sitting.
+- [ ] Ingested ingredients get 0% ABV as well as no price — unlike cost, nothing flags that.
+- [ ] Wire venue attribution into publishing: `publishSpec` passes `venueId: null` today, so
+      half of "attribution is data" silently doesn't happen.
+
+## M4 — Menu scale
+**Done when:** twenty drinks is as comfortable as one.
+
+- [ ] Ingest a whole menu in a sitting, not a drink at a time.
+- [ ] Duplicate, re-price and re-cost across many specs.
+- [ ] The canvas stays readable at that size — this is where the 60fps gate gets measured.
+
+## M5 — Survive a dropout
+**Done when:** losing wifi mid-service costs nothing.
+
+- [ ] Optimistic writes with a retry queue; an in-flight edit is never lost.
+- [ ] Failures say what happened and what to do, and never silently discard.
+      → deliberately **not** offline-first. A local database with sync stays out.
+
+## M6 — Tablet reality
+**Done when:** it is genuinely usable behind a bar.
+
+- [!] Long-press and touch on real hardware — blocked, needs a device or BrowserStack.
+- [ ] 44px targets at 768 and 1024; pinch and pan intact.
+- [ ] Legible in a dim room, one-handed, mid-service.
+- [ ] `prefers-reduced-motion` honoured.
+
+## M7 — The week
+**Done when:** the definition of done in `VISION.md` is met.
+
+- [ ] Put it in front of one working bartender with their own drinks.
+- [ ] Watch what they don't use, and what they reach for the notebook to do instead.
+- [ ] Come back to this file and rewrite it from what happened.
+
+---
+
+## After the week
+
+Not before. Each is real work, none of it serves M7.
+
+- **Nested preps** — reverses a ⚑ rule, needs a migration (`ingredient_id` nullable +
+  `child_prep_id` + XOR + cycle guard), a recursive `prep_costs`, and a change to the cost
+  engine's money path.
+- **The two-account commons round trip** — publish, search, fork, edit, ancestry and credit
+  intact. Phase 4's old definition of done, demoted because one bartender never forks a
+  stranger.
+- **Group-to-group links** — needs `0008_spec_group_links`. Anchor links to member spec ids,
+  not to a root, so a group splitting doesn't strand them.
+- **AI within the line** — substitution hints from your own library. Read and structure, never
+  invent.
+
+## Reversible decisions
+Vertical lineage · derived groups · nested preps being permitted at all. In force, revisitable
+with reason. The pillars in `VISION.md` are not.
