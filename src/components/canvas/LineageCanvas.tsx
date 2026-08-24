@@ -20,7 +20,6 @@ import SettingsPanel from '../spec/SettingsPanel';
 import { detachedBy } from '../../utils/childCounts';
 import CommonsPanel from './CommonsPanel';
 import SelectionMenu, { type Summon } from './SelectionMenu';
-import LineageStats from './LineageStats';
 
 const NODE_TYPES = { specNode: SpecNodeComponent };
 const EDGE_TYPES = { default: GradientEdge };
@@ -525,7 +524,6 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
         <IngestPanel onClose={() => setShowIngest(false)} onDone={(id) => selectSpec(id)} />
       )}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {canvasMode === 'canvas' && user && <LineageStats />}
       {canvasMode === 'canvas' && user && <SelectionMenu
           onNewSpec={handleNewSpec}
           onOpenRecipe={(o) => { setPanelOpen(true); setPanelBuilder(!!o?.builder); }}
