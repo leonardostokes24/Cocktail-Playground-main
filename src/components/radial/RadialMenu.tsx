@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useProofStore } from '../../store/useProofStore';
-import type { Ingredient } from '../../store/useProofStore';
 import { UNITS } from '../../utils/units';
-import RadialRing, { type Segment } from './RadialRing';
-import RadialSearch from './RadialSearch';
+import CommandPad, { PAD_SIZE, type Segment } from './CommandPad';
+import { childCounts } from '../../utils/childCounts';
+import { searchCatalogueIngredients } from '../../lib/supabase/catalogue';
+import RadialSearch, { type SearchItem } from './RadialSearch';
 
 export type RadialContext =
   | { kind: 'canvas'; position: { x: number; y: number } }
@@ -12,55 +13,61 @@ export type RadialContext =
 type Phase =
   | { tag: 'main' }
   | { tag: 'sub-ring' }
-  | { tag: 'search'; categoryType: string | null; categoryLabel: string }
-  | { tag: 'add-amount'; ingredient: Ingredient }
+  | { tag: 'search'; categoryType: string | null; categoryLabel: string; kind: 'ingredient' | 'prep' }
+  | { tag: 'add-amount'; item: SearchItem; kind: 'ingredient' | 'prep' }
   | { tag: 'confirm-delete' };
 
 interface Props {
   context: RadialContext;
   onClose: () => void;
+  onOpenLibrary?: () => void;
+  onOpenPreps?: () => void;
+  onOpenIngest?: () => void;
 }
 
 // ── Segment definitions ───────────────────────────────────────────────────────
 
 const CANVAS_SEGMENTS: Segment[] = [
-  { id: 'new-spec',      label: 'New Spec',      icon: '✦',  color: 'rgba(127,230,255,0.7)' },
-  { id: 'search-lib',   label: 'Library',        icon: '⌕',  disabled: true },
-  { id: 'quick-ingest', label: 'Ingest',          icon: '⇩',  disabled: true },
-  { id: 'new-prep',     label: 'New Prep',        icon: '⚗',  disabled: true },
+  { id: 'new-spec',     label: 'New spec',  icon: 'spark' },
+  { id: 'search-lib',   label: 'Library',   icon: 'library' },
+  { id: 'new-prep',     label: 'Preps',     icon: 'flask' },
+  { id: 'quick-ingest', label: 'Ingest',    icon: 'ingest' },
 ];
 
 const NODE_SEGMENTS: Segment[] = [
-  { id: 'branch',     label: 'Branch',         icon: '⎇',  color: 'rgba(127,230,255,0.7)' },
-  { id: 'add-ing',    label: 'Add Ingredient', icon: '+',   color: 'rgba(127,230,255,0.7)' },
-  { id: 'open-spec',  label: 'Open Spec',      icon: '→',   color: 'rgba(127,230,255,0.7)' },
-  { id: 'delete',     label: 'Delete',         icon: '✕',   color: 'rgba(255,100,100,0.7)' },
+  { id: 'branch',     label: 'Branch',    icon: 'branch' },
+  { id: 'add-ing',    label: 'Add',       icon: 'plus' },
+  { id: 'open-spec',  label: 'Open',      icon: 'open' },
+  { id: 'duplicate',  label: 'Duplicate', icon: 'duplicate' },
+  { id: 'publish',    label: 'Publish',   icon: 'publish' },
+  { id: 'delete',     label: 'Delete',    icon: 'trash' },
 ];
 
 const CONFIRM_SEGMENTS: Segment[] = [
-  { id: 'confirm', label: 'Confirm Delete', icon: '✕', color: 'rgba(239,68,68,0.8)' },
-  { id: 'cancel',  label: 'Cancel',         icon: '←', color: 'rgba(127,230,255,0.7)' },
+  { id: 'confirm', label: 'Delete it', icon: 'trash' },
+  { id: 'cancel',  label: 'Keep it',   icon: 'back', accent: 'neutral' },
 ];
 
 const CATEGORY_SEGMENTS: Segment[] = [
-  { id: 'spirit',    label: 'Spirit',    icon: '🥃' },
-  { id: 'modifier',  label: 'Modifier',  icon: '🍹' },
-  { id: 'citrus',    label: 'Citrus',    icon: '🍋' },
-  { id: 'sweetener', label: 'Sweetener', icon: '🍬' },
-  { id: 'bitters',   label: 'Bitters',   icon: '💧' },
-  { id: 'prep',      label: 'Prep',      icon: '⚗',  disabled: true },
-  { id: 'syrup',     label: 'Syrup',     icon: '🫙' },
-  { id: 'other',     label: 'Other',     icon: '○' },
+  { id: 'spirit',    label: 'Spirit',    icon: 'bottle' },
+  { id: 'modifier',  label: 'Modifier',  icon: 'glass' },
+  { id: 'citrus',    label: 'Citrus',    icon: 'citrus' },
+  { id: 'sweetener', label: 'Sweetener', icon: 'cube' },
+  { id: 'bitters',   label: 'Bitters',   icon: 'drop' },
+  { id: 'prep',      label: 'Prep',      icon: 'flask' },
+  { id: 'syrup',     label: 'Syrup',     icon: 'jar' },
+  { id: 'other',     label: 'Other',     icon: 'circle' },
 ];
 
 const LABEL_FOR: Record<string, string> = {
   spirit: 'Spirit', modifier: 'Modifier', citrus: 'Citrus',
   sweetener: 'Sweetener', bitters: 'Bitters', syrup: 'Syrup', other: 'Other',
+  prep: 'Preps',
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function RadialMenu({ context, onClose }: Props) {
+export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPreps, onOpenIngest }: Props) {
   const [phase, setPhase] = useState<Phase>({ tag: 'main' });
   const [amount, setAmount] = useState('30');
   const [unit, setUnit] = useState('ml');
@@ -73,9 +80,21 @@ export default function RadialMenu({ context, onClose }: Props) {
   const addComponent    = useProofStore(s => s.addComponent);
   const selectSpec      = useProofStore(s => s.selectSpec);
   const removeSpec      = useProofStore(s => s.removeSpec);
+  const publishSpec     = useProofStore(s => s.publishSpec);
   const specs           = useProofStore(s => s.specs);
+  const preps           = useProofStore(s => s.preps);
+  const recentIds       = useProofStore(s => s.recentIngredientIds);
+  const importCatalogue = useProofStore(s => s.importCatalogueIngredient);
+  // The catalogue is a remote lookup, so it streams in beside the local list
+  // rather than blocking it — your own ingredients appear instantly either way.
+  const [catalogueHits, setCatalogueHits] = useState<SearchItem[]>([]);
 
-  const { position } = context;
+  // Clamp so the pad stays inside the viewport
+  const HALF = PAD_SIZE / 2;
+  const MARGIN = 16;
+  const clampedX = Math.max(HALF + MARGIN, Math.min(window.innerWidth  - HALF - MARGIN, context.position.x));
+  const clampedY = Math.max(HALF + MARGIN, Math.min(window.innerHeight - HALF - MARGIN, context.position.y));
+  const position = { x: clampedX, y: clampedY };
   const nodeId = context.kind === 'node' ? context.nodeId : null;
 
   const goBack = useCallback(() => {
@@ -94,6 +113,15 @@ export default function RadialMenu({ context, onClose }: Props) {
   }, [onClose]);
 
   useEffect(() => {
+    if (phase.tag !== 'search' || phase.kind === 'prep') { setCatalogueHits([]); return; }
+    let cancelled = false;
+    searchCatalogueIngredients('', phase.categoryType ?? undefined)
+      .then(rows => { if (!cancelled) setCatalogueHits(rows.map(r => ({ id: r.id, name: r.name, type: r.type }))); })
+      .catch(() => { if (!cancelled) setCatalogueHits([]); });  // catalogue is a bonus, never a blocker
+    return () => { cancelled = true; };
+  }, [phase]);
+
+  useEffect(() => {
     if (phase.tag === 'add-amount') {
       setTimeout(() => amountRef.current?.focus(), 50);
     }
@@ -105,8 +133,12 @@ export default function RadialMenu({ context, onClose }: Props) {
       const x = specs.length ? Math.max(...specs.map(s => s.canvas_x)) + 280 : 100;
       await createSpec({ name: 'New Spec', canvas_x: x, canvas_y: 200 });
       onClose();
+      return;
     }
-  }, [specs, createSpec, onClose]);
+    if (id === 'search-lib') { onOpenLibrary?.(); onClose(); return; }
+    if (id === 'new-prep')   { onOpenPreps?.();   onClose(); return; }
+    if (id === 'quick-ingest') { onOpenIngest?.(); onClose(); return; }
+  }, [specs, createSpec, onClose, onOpenLibrary, onOpenPreps, onOpenIngest]);
 
   // ── Node ring handlers ────────────────────────────────────────────────────
   const handleNodeSelect = useCallback(async (id: string) => {
@@ -115,30 +147,76 @@ export default function RadialMenu({ context, onClose }: Props) {
     if (id === 'open-spec') { selectSpec(nodeId); onClose(); }
     if (id === 'add-ing')   { setPhase({ tag: 'sub-ring' }); }
     if (id === 'delete')    { setPhase({ tag: 'confirm-delete' }); }
-  }, [nodeId, branchSpec, selectSpec, onClose]);
+    if (id === 'publish')   { await publishSpec(nodeId); onClose(); }
+    if (id === 'duplicate') {
+      const parent = specs.find(s => s.id === nodeId);
+      if (!parent) return;
+      const copy = await createSpec({
+        name: `${parent.name} copy`,
+        method: parent.method,
+        glass: parent.glass,
+        garnish: parent.garnish,
+        build_text: parent.build_text,
+        sale_price: parent.sale_price,
+        canvas_x: parent.canvas_x + 280,
+        canvas_y: parent.canvas_y - 60,
+      });
+      const parentComponents = specComponentsMap[nodeId] ?? [];
+      for (const comp of parentComponents) {
+        await addComponent({
+          spec_id: copy.id,
+          ingredient_id: comp.ingredient_id,
+          prep_id: comp.prep_id,
+          amount_ml: comp.amount_ml,
+          original_amount: comp.original_amount,
+          original_unit: comp.original_unit,
+          position: comp.position,
+        });
+      }
+      selectSpec(copy.id);
+      onClose();
+    }
+  }, [nodeId, branchSpec, selectSpec, publishSpec, createSpec, addComponent, specComponentsMap, specs, onClose]);
 
   // ── Sub-ring: category ────────────────────────────────────────────────────
   const handleCategorySelect = useCallback((catId: string) => {
     if (CATEGORY_SEGMENTS.find(s => s.id === catId)?.disabled) return;
-    setPhase({ tag: 'search', categoryType: catId === 'other' ? null : catId, categoryLabel: LABEL_FOR[catId] ?? catId });
+    setPhase({
+      tag: 'search',
+      categoryType: catId === 'other' || catId === 'prep' ? null : catId,
+      categoryLabel: LABEL_FOR[catId] ?? catId,
+      kind: catId === 'prep' ? 'prep' : 'ingredient',
+    });
   }, []);
 
   // ── Search result ─────────────────────────────────────────────────────────
-  const handleIngredientSelect = useCallback((ing: Ingredient) => {
-    setPhase({ tag: 'add-amount', ingredient: ing });
+  const handleItemSelect = useCallback((item: SearchItem) => {
+    setPhase(prev => (prev.tag === 'search'
+      ? { tag: 'add-amount', item, kind: prev.kind }
+      : prev));
   }, []);
 
   // ── Add confirm ───────────────────────────────────────────────────────────
   const handleAddConfirm = useCallback(async () => {
     if (!nodeId || phase.tag !== 'add-amount') return;
-    const { ingredient } = phase;
+    const { item, kind } = phase;
     const amountNum = parseFloat(amount);
     if (!amountNum || amountNum <= 0) return;
+
+    // A catalogue pick isn't yours yet. Import it unpriced first — ⚑ the shared
+    // catalogue's suggested price is never adopted on the user's behalf.
+    let resolvedId = item.id;
+    if (resolvedId.startsWith('catalogue:')) {
+      const imported = await importCatalogue(resolvedId.slice('catalogue:'.length), null);
+      resolvedId = imported.id;
+    }
     const { toMl } = await import('../../utils/units');
     const nextPos = specComponentsMap[nodeId]?.length ?? 0;
+    // spec_components is ingredient XOR prep — never both.
     await addComponent({
       spec_id: nodeId,
-      ingredient_id: ingredient.id,
+      ingredient_id: kind === 'ingredient' ? resolvedId : null,
+      prep_id: kind === 'prep' ? resolvedId : null,
       amount_ml: toMl(amountNum, unit),
       original_amount: amountNum,
       original_unit: unit,
@@ -146,7 +224,7 @@ export default function RadialMenu({ context, onClose }: Props) {
     });
     selectSpec(nodeId);
     onClose();
-  }, [nodeId, phase, amount, unit, specComponentsMap, addComponent, selectSpec, onClose]);
+  }, [nodeId, phase, amount, unit, specComponentsMap, addComponent, selectSpec, onClose, importCatalogue]);
 
   // ── Delete confirm ────────────────────────────────────────────────────────
   const handleConfirmSelect = useCallback(async (id: string) => {
@@ -172,7 +250,49 @@ export default function RadialMenu({ context, onClose }: Props) {
 
   const showSearch = phase.tag === 'search';
   const showAmount = phase.tag === 'add-amount';
-  const showRing   = !showSearch;
+  const showPad = !showSearch && !showAmount;
+
+  // What the pad's centre names — the target, not the tool.
+  const targetSpec = nodeId ? specs.find(s => s.id === nodeId) : null;
+  const padTitle = (() => {
+    if (phase.tag === 'confirm-delete') return `Delete ${targetSpec?.name ?? 'spec'}?`;
+    if (phase.tag === 'sub-ring') return 'Add what?';
+    if (context.kind === 'canvas') return 'Canvas';
+    return targetSpec?.name ?? 'Spec';
+  })();
+  // Deleting a spec detaches its twists rather than deleting them — say which,
+  // and how many, instead of a generic "cannot be undone".
+  const detaching = targetSpec ? (childCounts(specs)[targetSpec.id] ?? 0) : 0;
+  const padSubtitle = phase.tag === 'confirm-delete'
+    ? (detaching
+        ? `${detaching} twist${detaching > 1 ? 's' : ''} detach`
+        : 'cannot be undone')
+    : undefined;
+
+  // The search phase filters here so RadialSearch stays a dumb list.
+  const localItems: SearchItem[] = phase.tag === 'search'
+    ? (phase.kind === 'prep'
+        ? preps.map(p => ({ id: p.id, name: p.name, type: 'prep' }))
+        : ingredients.filter(i => !phase.categoryType || i.type === phase.categoryType))
+    : [];
+
+  // ⚑ Recents first — the radial rule. Everything else keeps its order.
+  const rank = new Map(recentIds.map((id, i) => [id, i]));
+  const ordered = [...localItems].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id)! : Infinity;
+    const rb = rank.has(b.id) ? rank.get(b.id)! : Infinity;
+    return ra - rb;
+  });
+
+  // Catalogue entries you don't own yet, appended and marked so they read as an
+  // import rather than something already in your library.
+  const ownNames = new Set(localItems.map(i => i.name.toLowerCase()));
+  const searchItems: SearchItem[] = [
+    ...ordered,
+    ...catalogueHits
+      .filter(c => !ownNames.has(c.name.toLowerCase()))
+      .map(c => ({ ...c, id: `catalogue:${c.id}`, type: c.type })),
+  ];
 
   return (
     <>
@@ -183,34 +303,36 @@ export default function RadialMenu({ context, onClose }: Props) {
         onContextMenu={e => { e.preventDefault(); onClose(); }}
       />
 
-      {/* Wheel container */}
+      {/* Pad container */}
       <div style={{ ...wheel, left: position.x, top: position.y }} onClick={e => e.stopPropagation()}>
 
-        {showRing && (
-          <RadialRing
+        {showPad && (
+          <CommandPad
             segments={currentSegments}
+            title={padTitle}
+            subtitle={padSubtitle}
             onSelect={handleSelect}
             onEscape={handleEscape}
-            radius={phase.tag === 'sub-ring' ? 110 : 96}
-            size={phase.tag === 'sub-ring' ? 68 : 64}
           />
         )}
 
-        {/* Centre content */}
+        {/* Centre hub */}
         <div style={centre}>
           {showSearch && phase.tag === 'search' && (
             <RadialSearch
-              ingredients={ingredients}
-              categoryType={phase.categoryType}
+              items={searchItems}
               categoryLabel={phase.categoryLabel}
-              onSelect={handleIngredientSelect}
+              emptyHint={phase.kind === 'prep'
+                ? 'No preps yet — make one in Preps first'
+                : `No ${phase.categoryLabel.toLowerCase()} yet — add via Library first`}
+              onSelect={handleItemSelect}
               onEscape={goBack}
             />
           )}
 
           {showAmount && phase.tag === 'add-amount' && (
             <div style={amountBox} onClick={e => e.stopPropagation()}>
-              <span style={amountName}>{phase.ingredient.name}</span>
+              <span style={amountName}>{phase.item.name}</span>
               <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                 <input
                   ref={amountRef}
@@ -227,17 +349,9 @@ export default function RadialMenu({ context, onClose }: Props) {
                 </select>
               </div>
               <div style={{ display: 'flex', gap: 5 }}>
-                <button onClick={handleAddConfirm} style={confirmBtn}>✓ Add</button>
-                <button onClick={goBack} style={cancelBtn}>✕</button>
+                <button onClick={handleAddConfirm} style={confirmBtn}>Add</button>
+                <button onClick={goBack} style={cancelBtn}>Back</button>
               </div>
-            </div>
-          )}
-
-          {!showSearch && !showAmount && (
-            <div style={centreLabel}>
-              {context.kind === 'canvas' && <span style={centreTip}>Right-click</span>}
-              {phase.tag === 'confirm-delete' && <span style={{ ...centreTip, color: '#f87171' }}>Delete?</span>}
-              {phase.tag === 'sub-ring' && <span style={centreTip}>Category</span>}
             </div>
           )}
         </div>
@@ -250,7 +364,11 @@ export default function RadialMenu({ context, onClose }: Props) {
 
 const backdrop: React.CSSProperties = {
   position: 'fixed', inset: 0, zIndex: 2000,
+  // A plain dim, not glass — a full-screen backdrop-filter is banned, and the
+  // pad has no panel of its own, so this is what keeps its labels readable.
+  background: 'rgba(6,5,12,.52)',
 };
+
 
 const wheel: React.CSSProperties = {
   position: 'fixed',
@@ -263,37 +381,21 @@ const centre: React.CSSProperties = {
   position: 'absolute',
   top: '50%',
   left: '50%',
-  transform: 'translate(-50%, -50%)',
   pointerEvents: 'all',
 };
 
-const centreLabel: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 54, height: 54,
-  background: 'linear-gradient(168deg, rgba(255,255,255,.07), rgba(255,255,255,.02))',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  border: '1px solid var(--glass-border)',
-  borderRadius: '50%',
-  boxShadow: 'inset 1px 0 0 var(--edge-cyan), inset -1px 0 0 var(--edge-magenta)',
-};
-
-const centreTip: React.CSSProperties = {
-  fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700,
-  color: 'var(--mute)', letterSpacing: '0.04em', textAlign: 'center',
-};
 
 const amountBox: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center',
   background: 'linear-gradient(168deg, rgba(255,255,255,.10), rgba(255,255,255,.04))',
   backdropFilter: 'blur(24px) saturate(135%)',
   WebkitBackdropFilter: 'blur(24px) saturate(135%)',
-  border: '1px solid var(--glass-border)',
-  boxShadow: 'inset 1px 0 0 var(--edge-cyan), inset -1px 0 0 var(--edge-magenta), inset 0 1px 0 var(--edge-top), 0 16px 40px rgba(0,0,0,.6)',
+  border: '1px solid rgba(255,255,255,.16)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.24), inset 1.2px 0 0 rgba(120,225,255,.42), inset -1.2px 0 0 rgba(255,135,210,.36), 0 18px 36px -16px rgba(0,0,0,.8)',
   borderRadius: 12,
   padding: '12px 14px',
   width: 180,
-  transform: 'translateY(-50%)',
+  transform: 'translate(-50%, -50%)',
 };
 
 const amountName: React.CSSProperties = {

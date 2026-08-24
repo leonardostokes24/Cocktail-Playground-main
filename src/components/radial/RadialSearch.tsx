@@ -1,15 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Ingredient } from '../../store/useProofStore';
+
+/** Ingredients and preps are both addable, so the search is item-shaped. */
+export interface SearchItem {
+  id: string;
+  name: string;
+  type?: string | null;
+}
 
 interface Props {
-  ingredients: Ingredient[];
-  categoryType: string | null;
+  /** Already filtered to the chosen category by the caller. */
+  items: SearchItem[];
   categoryLabel: string;
-  onSelect: (ing: Ingredient) => void;
+  emptyHint: string;
+  onSelect: (item: SearchItem) => void;
   onEscape: () => void;
 }
 
-export default function RadialSearch({ ingredients, categoryType, categoryLabel, onSelect, onEscape }: Props) {
+export default function RadialSearch({ items, categoryLabel, emptyHint, onSelect, onEscape }: Props) {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -27,12 +34,11 @@ export default function RadialSearch({ ingredients, categoryType, categoryLabel,
     return () => window.removeEventListener('keydown', handler);
   }, [onEscape]);
 
-  const filtered = ingredients
-    .filter(i => !categoryType || i.type === categoryType)
+  const filtered = items
     .filter(i => !debouncedQuery.trim() || i.name.toLowerCase().includes(debouncedQuery.toLowerCase()))
     .slice(0, 6);
 
-  const placeholder = categoryType ? `Search ${categoryLabel}…` : 'Search ingredients…';
+  const placeholder = `Search ${categoryLabel.toLowerCase()}…`;
 
   return (
     <div style={container} onClick={e => e.stopPropagation()}>
@@ -45,22 +51,18 @@ export default function RadialSearch({ ingredients, categoryType, categoryLabel,
       />
       <div style={results}>
         {filtered.length === 0 ? (
-          <p style={empty}>
-            {categoryType
-              ? `No ${categoryLabel.toLowerCase()} ingredients yet — add via Library first`
-              : 'No ingredients match'}
-          </p>
+          <p style={empty}>{debouncedQuery.trim() ? 'Nothing matches' : emptyHint}</p>
         ) : (
-          filtered.map(ing => (
+          filtered.map(item => (
             <button
-              key={ing.id}
+              key={item.id}
               style={resultBtn}
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              onClick={e => { e.stopPropagation(); onSelect(ing); }}
+              onClick={e => { e.stopPropagation(); onSelect(item); }}
             >
-              <span style={{ color: 'var(--ink)', fontSize: 13, fontFamily: 'var(--font-ui)' }}>{ing.name}</span>
-              {ing.type && <span style={{ color: 'var(--mute)', fontSize: 10, fontFamily: 'var(--font-ui)', textTransform: 'uppercase' }}>{ing.type}</span>}
+              <span style={{ color: 'var(--ink)', fontSize: 13, fontFamily: 'var(--font-ui)' }}>{item.name}</span>
+              {item.type && <span style={{ color: 'var(--mute)', fontSize: 10, fontFamily: 'var(--font-ui)', textTransform: 'uppercase' }}>{item.type}</span>}
             </button>
           ))
         )}

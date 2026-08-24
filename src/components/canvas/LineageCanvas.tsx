@@ -1,27 +1,32 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow, Background, Controls, MiniMap,
+  ReactFlow, Background, SelectionMode,
   useNodesState, useEdgesState, useReactFlow,
   type NodeMouseHandler, type OnNodeDrag,
+  type OnConnect, type OnConnectStart, type OnConnectEnd,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useProofStore } from '../../store/useProofStore';
 import SpecNodeComponent from './SpecNode';
+import GradientEdge from '../CustomEdge';
 import IngredientLibrary from '../library/IngredientLibrary';
+import PrepLibrary from '../library/PrepLibrary';
+import IngestPanel from '../library/IngestPanel';
+import VenuePanel from '../library/VenuePanel';
 import SpecPanel from '../spec/SpecPanel';
 import SettingsPanel from '../spec/SettingsPanel';
 import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
+import ContextMenuFallback from '../radial/ContextMenuFallback';
+import { detachedBy } from '../../utils/childCounts';
+import CommonsPanel from './CommonsPanel';
 
-// Defined outside component so the reference never changes between renders.
 const NODE_TYPES = { specNode: SpecNodeComponent };
-
-// Stable empty object shared across all nodes — SpecNode reads from store directly.
-const EMPTY_DATA = {} as Record<string, never>;
+const EDGE_TYPES = { default: GradientEdge };
 
 interface Props {
-  user: any;
+  user: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   onLoginClick: () => void;
   onLogoutClick: () => void;
 }
@@ -30,7 +35,9 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const {
     specs, specsLoading, selectedSpecId,
     loadSpecs, loadSpecCosts, loadIngredients, loadAllSpecComponents,
-    createSpec, editSpec, selectSpec,
+    createSpec, editSpec, selectSpec, branchSpec, attachBranch,
+    removeSpecs, duplicateSpecs, tidySpecs, publishSpecs,
+    activeFormulaId, forkSources, loadForkSources,
   } = useProofStore(useShallow(state => ({
     specs: state.specs,
     specsLoading: state.specsLoading,
@@ -42,64 +49,109 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     createSpec: state.createSpec,
     editSpec: state.editSpec,
     selectSpec: state.selectSpec,
+    branchSpec: state.branchSpec,
+    attachBranch: state.attachBranch,
+    removeSpecs: state.removeSpecs,
+    duplicateSpecs: state.duplicateSpecs,
+    tidySpecs: state.tidySpecs,
+    publishSpecs: state.publishSpecs,
+    activeFormulaId: state.activeFormulaId,
+    forkSources: state.forkSources,
+    loadForkSources: state.loadForkSources,
   })));
 
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showPreps, setShowPreps] = useState(false);
+  const [showIngest, setShowIngest] = useState(false);
+  const [showVenues, setShowVenues] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
+  // The pad is the menu. The list is an explicit fallback the user opts into —
+  // it used to be forced on first run, which meant a fresh profile never saw
+  // the pad at all unless it found one small button inside the fallback.
+  const [menuMode, setMenuMode] = useState<'radial' | 'list'>('radial');
+  const [zoom, setZoom] = useState(100);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  // Marquee mode: drag the pane to draw a selection box instead of panning.
+  const [boxSelect, setBoxSelect] = useState(false);
   const dragSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const didFitRef = useRef(false);
-  const { fitView } = useReactFlow();
+  // Stable ref for long-press callback — avoids rebuilding node data on every render
+  const longPressRef = useRef<(nodeId: string, pos: { x: number; y: number }) => void>(() => {});
+  const { fitView, zoomIn, zoomOut, getViewport, screenToFlowPosition } = useReactFlow();
+  // Source node of an in-progress handle drag (for drag-to-empty → twist).
+  const connectingFrom = useRef<string | null>(null);
 
-  // React Flow owns node/edge state — this is the source of truth for positions
-  // and selection so React Flow never fights with external state.
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([]);
 
-  // Load data when user logs in
   useEffect(() => {
     if (!user) return;
-    loadSpecs().then(() => loadSpecCosts());
+    loadSpecs().then(() => { loadSpecCosts(); loadForkSources(); });
     loadIngredients();
     loadAllSpecComponents();
   }, [user?.id]);
 
-  // Sync node list from store.
-  // Preserve React Flow's current position for existing nodes (drag positions are
-  // held in React Flow state, not persisted to the store until the debounce fires).
   useEffect(() => {
     setRfNodes(current => {
-      const posMap = new Map(current.map(n => [n.id, n.position]));
-      return specs.map(spec => ({
-        id: spec.id,
-        type: 'specNode' as const,
-        position: posMap.get(spec.id) ?? { x: spec.canvas_x, y: spec.canvas_y },
-        data: EMPTY_DATA,
-      }));
+      // Carry live canvas state across the rebuild. Position AND selection live in
+      // React Flow, not the store — dropping `selected` here silently cleared the
+      // selection on every specs change (e.g. the debounced drag-position save),
+      // which made the bulk actions look broken.
+      const liveById = new Map(current.map(n => [n.id, n]));
+      return specs.map(spec => {
+        const live = liveById.get(spec.id);
+        return {
+          id: spec.id,
+          type: 'specNode' as const,
+          position: live?.position ?? { x: spec.canvas_x, y: spec.canvas_y },
+          selected: live?.selected ?? false,
+          data: stableNodeData,
+        };
+      });
     });
   }, [specs]);
 
-  // Sync edges
   useEffect(() => {
-    setRfEdges(
-      specs
-        .filter(s => s.parent_spec_id)
-        .map(s => ({
-          id: `${s.parent_spec_id}→${s.id}`,
-          source: s.parent_spec_id!,
-          target: s.id,
-          type: 'smoothstep',
-          label: s.change_note || undefined,
-          style: { stroke: '#334155', strokeWidth: 1.5 },
-          labelStyle: { fill: '#64748b', fontSize: 11 },
-          labelBgStyle: { fill: 'rgba(10,15,28,0.85)', fillOpacity: 0.85 },
-          labelBgPadding: [4, 2] as [number, number],
-          labelBgBorderRadius: 4,
-        }))
-    );
-  }, [specs]);
+    // Branch: your own version of your own drink — parent is a spec you own.
+    const branchEdges = specs
+      .filter(s => s.parent_spec_id)
+      .map(s => ({
+        id: `${s.parent_spec_id}→${s.id}`,
+        source: s.parent_spec_id!,
+        target: s.id,
+        type: 'default',
+        label: s.change_note || undefined,
+        data: { kind: 'branch' as const },
+      }));
 
-  // Fit view once after initial load (nodes go from empty → populated)
+    // Fork: crossed over from a published snapshot. An edge can only be drawn
+    // when that snapshot's live spec is also on this canvas — for a genuine
+    // cross-user fork it belongs to someone else and RLS hides it, so the node
+    // carries a FORK badge instead of a dangling edge to nowhere.
+    const onCanvas = new Set(specs.map(s => s.id));
+    const forkEdges = specs
+      .filter(s => s.forked_from_published_id)
+      .map(s => {
+        const src = forkSources[s.forked_from_published_id!];
+        if (!src?.spec_id || !onCanvas.has(src.spec_id) || src.spec_id === s.id) return null;
+        return {
+          id: `fork:${src.spec_id}→${s.id}`,
+          source: src.spec_id,
+          target: s.id,
+          type: 'default',
+          label: 'forked',
+          data: { kind: 'fork' as const },
+        };
+      })
+      .filter((e): e is NonNullable<typeof e> => e !== null);
+
+    setRfEdges([...branchEdges, ...forkEdges]);
+  }, [specs, forkSources]);
+
   useEffect(() => {
     if (rfNodes.length > 0 && !didFitRef.current) {
       didFitRef.current = true;
@@ -108,7 +160,9 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [rfNodes.length]);
 
   // ── Handlers ─────────────────────────────────────────────────
-  const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
+  const onNodeClick: NodeMouseHandler = useCallback((evt, node) => {
+    // Multi-select (⌘/Ctrl or Shift) builds a selection — don't open the panel over it.
+    if (evt.metaKey || evt.ctrlKey || evt.shiftKey) return;
     selectSpec(node.id);
   }, [selectSpec]);
 
@@ -119,6 +173,88 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     }, 300);
   }, [editSpec]);
 
+  // ── Lineage gestures ─────────────────────────────────────────
+  const onConnectStart: OnConnectStart = useCallback((_evt, params) => {
+    connectingFrom.current = params.nodeId ?? null;
+  }, []);
+
+  // Drag a node's handle onto another node → attach it as a branch (cycle-guarded).
+  const onConnect: OnConnect = useCallback((conn) => {
+    if (conn.source && conn.target && conn.source !== conn.target) {
+      attachBranch(conn.target, conn.source);
+    }
+  }, [attachBranch]);
+
+  // Drag a node's handle onto empty canvas → spawn a twist (branch child) there.
+  const onConnectEnd: OnConnectEnd = useCallback((event) => {
+    const source = connectingFrom.current;
+    connectingFrom.current = null;
+    if (!source || !user) return;
+    const target = event.target as Element | null;
+    if (!target?.classList?.contains('react-flow__pane')) return; // dropped on a node → onConnect handled it
+    const point = 'changedTouches' in event ? event.changedTouches[0] : (event as MouseEvent);
+    const pos = screenToFlowPosition({ x: point.clientX, y: point.clientY });
+    // Centre the 232px-wide node under the cursor. Height is content-driven now
+    // (recipe rows), so only nudge y by the header — don't assume a fixed height.
+    branchSpec(source, { x: pos.x - 116, y: pos.y - 28 });
+  }, [screenToFlowPosition, branchSpec, user]);
+
+  // ── Selection & bulk actions ─────────────────────────────────
+  // React Flow owns selection state; derive the ids rather than duplicating it.
+  const selectedIds = useMemo(() => rfNodes.filter(n => n.selected).map(n => n.id), [rfNodes]);
+
+  // Twists whose parent is in the selection but which aren't selected themselves
+  // survive the delete as roots. The dock names them before you commit.
+  const bulkDetaching = useMemo(
+    () => detachedBy(specs, selectedIds),
+    [specs, selectedIds],
+  );
+  const selectedCount = selectedIds.length;
+  const hasSelection = selectedCount > 0;
+  const actionsDisabled = !hasSelection || bulkBusy;
+
+  // Widths mirror each panel's own style; the widest open one reserves space so
+  // the dock never sits underneath it.
+  const openPanelWidth = Math.max(
+    selectedSpecId ? 560 : 0,          // SpecPanel
+    showLibrary ? 680 : 0,             // IngredientLibrary
+    showPreps ? 620 : 0,               // PrepLibrary
+    showSettings ? 420 : 0,            // SettingsPanel
+    canvasMode === 'commons' ? 500 : 0 // CommonsPanel (480 + 20 right margin)
+  );
+
+  // A changed selection invalidates a pending delete confirmation.
+  useEffect(() => { setConfirmingDelete(false); }, [selectedCount]);
+
+  const clearSelection = useCallback(() => {
+    setRfNodes(nds => nds.map(n => (n.selected ? { ...n, selected: false } : n)));
+    selectSpec(null);
+  }, [setRfNodes, selectSpec]);
+
+  // Every bulk action ends with the selection cleared, so the dock returns to rest.
+  const runBulk = useCallback(async (fn: (ids: string[]) => Promise<void>) => {
+    if (!selectedIds.length || bulkBusy) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    try {
+      await fn(selectedIds);
+      clearSelection();
+    } catch (err) {
+      // Surface it in the dock — a silent failure here reads as "delete is broken".
+      // Supabase rejects with a PostgrestError object, not an Error instance, so
+      // check for a message property too or the real reason is lost.
+      const message =
+        err instanceof Error ? err.message
+        : typeof err === 'object' && err !== null && typeof (err as { message?: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Action failed';
+      setBulkError(message);
+    } finally {
+      setBulkBusy(false);
+      setConfirmingDelete(false);
+    }
+  }, [selectedIds, bulkBusy, clearSelection]);
+
   const handleNewSpec = useCallback(async () => {
     const x = specs.length ? Math.max(...specs.map(s => s.canvas_x)) + 280 : 100;
     const spec = await createSpec({ name: 'New Spec', canvas_x: x, canvas_y: 200 });
@@ -126,7 +262,6 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [specs, createSpec, selectSpec]);
 
   const handlePanelClose = useCallback(() => {
-    // Clear React Flow selection state
     setRfNodes(nds => nds.map(n => n.selected ? { ...n, selected: false } : n));
     selectSpec(null);
     loadSpecCosts();
@@ -137,110 +272,509 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
     if (selectedSpecId) selectSpec(null);
   }, [radialCtx, selectedSpecId, selectSpec]);
 
+  const openMenu = useCallback((ctx: RadialContext) => {
+    setRadialCtx(ctx);
+    setMenuMode('radial');
+  }, []);
+
+  const handleNodeLongPress = useCallback((nodeId: string, pos: { x: number; y: number }) => {
+    openMenu({ kind: 'node', nodeId, position: pos });
+  }, [openMenu]);
+  // Keep ref in sync so SpecNode always has the latest callback without node data rebuild
+  longPressRef.current = handleNodeLongPress;
+
+  // Stable nodeData object — same reference forever, so React.memo on SpecNode can skip re-renders
+  const stableNodeData = useMemo(() => ({
+    onLongPress: (nodeId: string, pos: { x: number; y: number }) => longPressRef.current(nodeId, pos),
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onPaneContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (!user) return;
-    setRadialCtx({ kind: 'canvas', position: { x: e.clientX, y: e.clientY } });
-  }, [user]);
+    openMenu({ kind: 'canvas', position: { x: e.clientX, y: e.clientY } });
+  }, [user, openMenu]);
 
   const onNodeContextMenu: NodeMouseHandler = useCallback((e, node) => {
     e.preventDefault();
     if (!user) return;
-    setRadialCtx({ kind: 'node', nodeId: node.id, position: { x: e.clientX, y: e.clientY } });
-  }, [user]);
+    openMenu({ kind: 'node', nodeId: node.id, position: { x: e.clientX, y: e.clientY } });
+  }, [user, openMenu]);
+
+  const handleZoomIn = useCallback(() => {
+    zoomIn();
+    setTimeout(() => setZoom(Math.round(getViewport().zoom * 100)), 200);
+  }, [zoomIn, getViewport]);
+
+  const handleZoomOut = useCallback(() => {
+    zoomOut();
+    setTimeout(() => setZoom(Math.round(getViewport().zoom * 100)), 200);
+  }, [zoomOut, getViewport]);
+
+  const handleFit = useCallback(() => {
+    fitView({ padding: 0.15, duration: 400 });
+    setTimeout(() => setZoom(Math.round(getViewport().zoom * 100)), 450);
+  }, [fitView, getViewport]);
+
+  const onMoveEnd = useCallback(() => {
+    setZoom(Math.round(getViewport().zoom * 100));
+  }, [getViewport]);
 
   // ── Render ───────────────────────────────────────────────────
   return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      <header style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 20 }}>🍹</span>
-          <span style={{ fontWeight: 800, fontSize: 15, color: '#e2e8f0', letterSpacing: '-0.01em' }}>Proof</span>
-          {specsLoading && <span style={{ fontSize: 11, color: '#475569' }}>Loading…</span>}
+    <div style={{ width: '100vw', height: '100vh', background: 'var(--ground)', position: 'relative', overflow: 'hidden' }}>
+
+      {/* Light blooms — give glass something to refract */}
+      <div className="bloom bloom-indigo" style={{ left: -60, top: 60, width: 460, height: 460 }} />
+      <div className="bloom bloom-teal" style={{ right: 60, top: -40, width: 420, height: 420 }} />
+      <div className="bloom bloom-plum" style={{ left: '44%', bottom: -120, width: 520, height: 460 }} />
+
+      {/* ── Floating toolbar ─────────────────────────────────── */}
+      <div style={toolbar}>
+        {/* Left: wordmark + toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+          <span className="display" style={wordmark}>Proof</span>
+          {specsLoading && <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--text-muted)' }}>Loading…</span>}
+          <div style={toggle}>
+            <button
+              onClick={() => setCanvasMode('canvas')}
+              style={canvasMode === 'canvas' ? toggleActive : toggleInactive}
+            >
+              Canvas
+            </button>
+            <button
+              onClick={() => setCanvasMode('commons')}
+              style={canvasMode === 'commons' ? toggleActive : toggleInactive}
+            >
+              Commons
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {user ? (
+
+        {/* Right: model selector + actions + avatar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {user && (
             <>
-              <button onClick={() => setShowLibrary(true)} style={hBtn()}>🧪 Library</button>
-              <button onClick={() => setShowSettings(true)} style={hBtn()}>⚙ Settings</button>
-              <button onClick={handleNewSpec} style={hBtn('#10b981')}>+ New Spec</button>
-              <button onClick={onLogoutClick} style={hBtn()}>Sign Out</button>
+              <button onClick={() => setShowSettings(true)} style={modelPill}>
+                <span style={{ fontFamily: 'var(--font-ui)', fontSize: 10, color: 'var(--text-muted)' }}>Model</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>GP% ex-VAT</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>▾</span>
+              </button>
+              <button onClick={() => setShowLibrary(true)} style={toolbarBtn}>Library</button>
+              <button onClick={() => setShowPreps(true)} style={toolbarBtn}>Preps</button>
+              <button onClick={() => setShowVenues(true)} style={toolbarBtn}>Venues</button>
+              <button onClick={handleNewSpec} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>+ New Spec</button>
+              <button onClick={onLogoutClick} style={toolbarBtn}>Sign Out</button>
             </>
-          ) : (
-            <button onClick={onLoginClick} style={hBtn('#10b981')}>Sign In</button>
+          )}
+          {!user && (
+            <button onClick={onLoginClick} style={{ ...toolbarBtn, color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>Sign In</button>
+          )}
+          {user && (
+            <div style={avatar}>
+              {user.email?.[0]?.toUpperCase() ?? 'U'}
+            </div>
           )}
         </div>
-      </header>
+      </div>
 
-      <div style={{ flex: 1 }}>
+      {/* ── Canvas ───────────────────────────────────────────── */}
+      {/* Below ~55% zoom the recipe rows are unreadable — CSS hides them (see index.css). */}
+      <div style={{ position: 'absolute', inset: 0 }} data-zoom={zoom < 55 ? 'far' : 'near'}>
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
           onNodeClick={onNodeClick}
           onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
           onPaneContextMenu={onPaneContextMenu}
           onNodeContextMenu={onNodeContextMenu}
-          minZoom={0.2}
-          maxZoom={2}
+          onMoveEnd={onMoveEnd}
+          minZoom={0.15}
+          maxZoom={2.5}
           onlyRenderVisibleElements
+          // Select mode: drag the pane to marquee-select. Middle mouse still pans
+          // (button 2 is left alone so right-click keeps opening the radial menu).
+          selectionOnDrag={boxSelect}
+          panOnDrag={boxSelect ? [1] : true}
+          // Partial: touching a node selects it — full containment is too fussy
+          // now that nodes are tall recipe cards.
+          selectionMode={SelectionMode.Partial}
+          // Backspace would remove nodes from canvas state only, leaving the DB rows
+          // to reappear on reload. Deletion goes through the dock (store-backed).
+          deleteKeyCode={null}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="#1e293b" gap={24} size={1} />
-          <Controls style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #1e293b', borderRadius: 8 }} />
-          <MiniMap
-            style={{ background: 'rgba(10,15,28,0.9)', border: '1px solid #1e293b' }}
-            nodeColor="#1e293b"
-            maskColor="rgba(0,0,0,0.4)"
-          />
+          <Background color="rgba(255,255,255,.04)" gap={28} size={1} />
         </ReactFlow>
 
+        {/* Empty states */}
         {!specsLoading && specs.length === 0 && user && (
           <div style={emptyState}>
-            <p style={{ color: '#475569', fontSize: 14, marginBottom: 16 }}>No specs yet — start your first riff.</p>
-            <button onClick={handleNewSpec} style={hBtn('#10b981', true)}>+ Create first spec</button>
+            <p style={{ fontFamily: 'var(--font-ui)', color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
+              No specs yet — right-click to start your first riff.
+            </p>
           </div>
         )}
         {!user && (
           <div style={emptyState}>
-            <p style={{ color: '#475569', fontSize: 14, marginBottom: 16 }}>Sign in to build your lineage canvas.</p>
-            <button onClick={onLoginClick} style={hBtn('#10b981', true)}>Sign In</button>
+            <p style={{ fontFamily: 'var(--font-ui)', color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
+              Sign in to build your lineage canvas.
+            </p>
+            <button onClick={onLoginClick} style={{ ...toolbarBtn, padding: '8px 20px', color: 'var(--cyan)', borderColor: 'rgba(127,230,255,.3)' }}>Sign In</button>
           </div>
         )}
       </div>
 
+      {/* ── Dock: zoom + selection actions ───────────────────── */}
+      {/* Keep the dock clear of whichever side panel is open (widths match each
+          panel's own style) so its buttons stay clickable. */}
+      <div style={{ ...dockRail, right: 12 + openPanelWidth }}>
+      <div style={zoomDock}>
+        <button onClick={handleZoomOut} style={dockBtn} aria-label="Zoom out">−</button>
+        <span style={dockZoom}>{zoom}%</span>
+        <button onClick={handleZoomIn} style={dockBtn} aria-label="Zoom in">+</button>
+        <div style={dockDivider} />
+        <button onClick={handleFit} style={dockTextBtn}>Fit lineage</button>
+
+        {/* Tool mode: pan vs marquee-select */}
+        <div style={dockDivider} />
+        <button
+          onClick={() => setBoxSelect(false)}
+          style={dockToggleBtn(!boxSelect)}
+          title="Pan the canvas (drag to move)"
+          aria-pressed={!boxSelect}
+        >
+          Pan
+        </button>
+        <button
+          onClick={() => setBoxSelect(true)}
+          style={dockToggleBtn(boxSelect)}
+          title="Select box (drag to select nodes)"
+          aria-pressed={boxSelect}
+        >
+          Select
+        </button>
+
+        {/* Selection actions — always present; inert until nodes are selected */}
+        <div style={dockDivider} />
+        {confirmingDelete && hasSelection ? (
+          <>
+            <span style={{ ...dockCount, color: '#ffb4b4' }}>
+              {bulkDetaching
+                ? `Delete ${selectedCount}? ${bulkDetaching} detach`
+                : `Delete ${selectedCount}?`}
+            </span>
+            <button
+              onClick={() => runBulk(removeSpecs)}
+              disabled={bulkBusy}
+              style={{ ...dockActionBtn(bulkBusy), color: '#ff9d9d', borderColor: 'rgba(255,120,120,.35)', background: 'rgba(255,120,120,.12)' }}
+            >
+              {bulkBusy ? 'Deleting…' : 'Delete'}
+            </button>
+            <button onClick={() => setConfirmingDelete(false)} style={dockActionBtn(false)}>Keep</button>
+          </>
+        ) : (
+          <>
+            <span style={hasSelection ? dockCount : dockCountIdle}>
+              {hasSelection ? `${selectedCount} selected` : 'None selected'}
+            </span>
+            <button onClick={() => runBulk(duplicateSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Duplicate</button>
+            <button onClick={() => runBulk(tidySpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Tidy</button>
+            <button onClick={() => runBulk(publishSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Publish</button>
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              disabled={actionsDisabled}
+              style={{ ...dockActionBtn(actionsDisabled), color: actionsDisabled ? 'var(--text-muted)' : '#ff9d9d' }}
+            >
+              Delete
+            </button>
+            <button
+              onClick={clearSelection}
+              disabled={actionsDisabled}
+              style={{ ...dockBtn, opacity: actionsDisabled ? 0.35 : 1, cursor: actionsDisabled ? 'default' : 'pointer' }}
+              aria-label="Clear selection"
+            >
+              ✕
+            </button>
+          </>
+        )}
+
+        {bulkError && (
+          <>
+            <div style={dockDivider} />
+            <span style={dockErrorText} title={bulkError}>{bulkError}</span>
+            <button onClick={() => setBulkError(null)} style={dockBtn} aria-label="Dismiss error">✕</button>
+          </>
+        )}
+      </div>
+      </div>
+
+      {/* ── Panels & menus ───────────────────────────────────── */}
       {showLibrary && <IngredientLibrary onClose={() => setShowLibrary(false)} />}
+      {showPreps && <PrepLibrary onClose={() => setShowPreps(false)} />}
+      {showVenues && <VenuePanel onClose={() => setShowVenues(false)} />}
+      {showIngest && (
+        <IngestPanel onClose={() => setShowIngest(false)} onDone={(id) => selectSpec(id)} />
+      )}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {selectedSpecId && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
-      {radialCtx && <RadialMenu context={radialCtx} onClose={() => setRadialCtx(null)} />}
+      {canvasMode === 'commons' && <CommonsPanel onClose={() => setCanvasMode('canvas')} />}
+
+      {radialCtx && menuMode === 'radial' && (
+        <RadialMenu
+          context={radialCtx}
+          onClose={() => setRadialCtx(null)}
+          onOpenLibrary={() => setShowLibrary(true)}
+          onOpenPreps={() => setShowPreps(true)}
+          onOpenIngest={() => setShowIngest(true)}
+        />
+      )}
+      {radialCtx && menuMode === 'list' && (
+        <ContextMenuFallback
+          context={radialCtx}
+          onClose={() => setRadialCtx(null)}
+          onSwitchToRadial={() => setMenuMode('radial')}
+        />
+      )}
     </div>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const headerStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  padding: '10px 16px', background: 'rgba(10,15,28,0.95)',
-  borderBottom: '1px solid #1e293b', flexShrink: 0, zIndex: 10,
-  backdropFilter: 'blur(12px)',
+const toolbar: React.CSSProperties = {
+  position: 'absolute',
+  top: 20, left: 20, right: 20,
+  height: 52,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '0 18px',
+  borderRadius: 'var(--r-bar)',
+  background: 'linear-gradient(168deg, rgba(255,255,255,.085), rgba(255,255,255,.025))',
+  backdropFilter: 'blur(24px) saturate(135%)',
+  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
+  border: '1px solid rgba(255,255,255,.14)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.2), 0 12px 30px -14px rgba(0,0,0,.7)',
+  zIndex: 60,
+  pointerEvents: 'all',
 };
 
-function hBtn(color = '#475569', large = false): React.CSSProperties {
+const wordmark: React.CSSProperties = {
+  fontSize: 20,
+  fontWeight: 700,
+  letterSpacing: '-0.02em',
+};
+
+const toggle: React.CSSProperties = {
+  display: 'flex',
+  gap: 2,
+  background: 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.08)',
+  borderRadius: 9,
+  padding: 3,
+};
+
+const toggleActive: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  fontWeight: 600,
+  color: '#0c0b14',
+  background: 'rgba(230,235,245,.92)',
+  padding: '5px 12px',
+  borderRadius: 6,
+  border: 'none',
+  cursor: 'pointer',
+};
+
+const toggleInactive: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  fontWeight: 500,
+  color: 'var(--text-muted)',
+  padding: '5px 12px',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+};
+
+const modelPill: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  background: 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.1)',
+  borderRadius: 9,
+  padding: '6px 11px',
+  cursor: 'pointer',
+};
+
+const toolbarBtn: React.CSSProperties = {
+  background: 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.1)',
+  borderRadius: 7,
+  color: 'var(--text-2)',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 12,
+  fontWeight: 500,
+  padding: '5px 12px',
+};
+
+const avatar: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  borderRadius: '50%',
+  background: 'linear-gradient(140deg, #3a3380, #5a2a66)',
+  border: '1px solid rgba(255,255,255,.18)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--text)',
+  flexShrink: 0,
+};
+
+const emptyState: React.CSSProperties = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
+  textAlign: 'center',
+  pointerEvents: 'all',
+};
+
+// The dock lives inside dockRail, which centres it in the space a side panel
+// isn't using — so its right-hand buttons can never end up under a panel.
+const zoomDock: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: 5,
+  borderRadius: 13,
+  maxWidth: '100%',
+  flexWrap: 'wrap',
+  justifyContent: 'center',
+  background: 'linear-gradient(168deg, rgba(255,255,255,.08), rgba(255,255,255,.03))',
+  backdropFilter: 'blur(24px) saturate(135%)',
+  WebkitBackdropFilter: 'blur(24px) saturate(135%)',
+  border: '1px solid rgba(255,255,255,.12)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.18), 0 14px 34px -14px rgba(0,0,0,.7)',
+  pointerEvents: 'all',
+};
+
+// Full-width rail; `right` shrinks to clear whichever side panel is open, and the
+// dock centres in what's left. zIndex sits above the panels (SpecPanel is 3100)
+// so the dock is never buried — that bug made Delete unclickable.
+const dockRail: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 22,
+  left: 12,
+  display: 'flex',
+  justifyContent: 'center',
+  pointerEvents: 'none',
+  zIndex: 3200,
+};
+
+const dockBtn: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 7,
+  color: 'var(--text-2)',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 16,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const dockTextBtn: React.CSSProperties = {
+  height: 30,
+  display: 'flex',
+  alignItems: 'center',
+  padding: '0 11px',
+  background: 'transparent',
+  border: '1px solid transparent',
+  borderRadius: 7,
+  color: 'var(--text-2)',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  fontWeight: 500,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+function dockToggleBtn(active: boolean): React.CSSProperties {
   return {
-    background: color === '#10b981' ? 'rgba(16,185,129,0.15)' : 'rgba(30,41,59,0.8)',
-    border: `1px solid ${color === '#10b981' ? 'rgba(16,185,129,0.4)' : '#334155'}`,
-    borderRadius: 6, color: color === '#10b981' ? '#10b981' : '#94a3b8',
-    cursor: 'pointer', fontSize: large ? 14 : 12, fontWeight: 600,
-    padding: large ? '8px 20px' : '5px 12px',
+    ...dockTextBtn,
+    background: active ? 'rgba(230,235,245,.92)' : 'transparent',
+    color: active ? '#0c0b14' : 'var(--text-muted)',
+    fontWeight: active ? 600 : 500,
   };
 }
 
-const emptyState: React.CSSProperties = {
-  position: 'absolute', top: '50%', left: '50%',
-  transform: 'translate(-50%, -50%)',
-  textAlign: 'center', pointerEvents: 'all',
+// The selection actions are always mounted, so they need a resting (inert) state.
+function dockActionBtn(disabled: boolean): React.CSSProperties {
+  return {
+    ...dockTextBtn,
+    color: disabled ? 'var(--text-muted)' : 'var(--text-2)',
+    opacity: disabled ? 0.45 : 1,
+    cursor: disabled ? 'default' : 'pointer',
+  };
+}
+
+const dockCount: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--cyan)',
+  padding: '0 4px 0 6px',
+  whiteSpace: 'nowrap',
+  userSelect: 'none',
+};
+
+const dockErrorText: React.CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11,
+  color: '#ff9d9d',
+  maxWidth: 260,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const dockCountIdle: React.CSSProperties = {
+  ...dockCount,
+  color: 'var(--text-muted)',
+  opacity: 0.7,
+};
+
+const dockZoom: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--text-2)',
+  minWidth: 40,
+  textAlign: 'center',
+  userSelect: 'none',
+};
+
+const dockDivider: React.CSSProperties = {
+  width: 1,
+  height: 18,
+  background: 'rgba(255,255,255,.1)',
+  margin: '0 2px',
 };

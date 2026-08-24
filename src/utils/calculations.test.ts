@@ -146,3 +146,76 @@ describe('computeSpecCosts — modifier chain and dilution/cost independence', (
     expect(costs.gpPct).toBeNull();
   });
 });
+
+describe('computeSpecCosts — optional pricing (unpriced components)', () => {
+  it('a fully priced spec reports fullyPriced and a GP', () => {
+    const costs = computeSpecCosts('built', 12, [{ amount_ml: 50, ingredients: { cost_per_ml: '0.04', abv: 40 } }], {});
+    expect(costs.unpricedCount).toBe(0);
+    expect(costs.fullyPriced).toBe(true);
+    expect(costs.gpPct).not.toBeNull();
+  });
+
+  it('a null cost_per_ml counts as unpriced and suppresses GP even with a sale price', () => {
+    const costs = computeSpecCosts('built', 12, [{ amount_ml: 50, ingredients: { cost_per_ml: null, abv: 40 } }], {});
+    expect(costs.unpricedCount).toBe(1);
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.gpPct).toBeNull();
+  });
+
+  it('a mix of priced and unpriced sums only the priced cost and stays not-fully-priced', () => {
+    const costs = computeSpecCosts('built', 12, [
+      { amount_ml: 50, ingredients: { cost_per_ml: '0.04', abv: 40 } }, // 2.00
+      { amount_ml: 20, ingredients: { cost_per_ml: null, abv: 0 } },    // unpriced → 0
+    ], {});
+    expect(costs.pourCost).toBeCloseTo(2);
+    expect(costs.unpricedCount).toBe(1);
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.gpPct).toBeNull();
+  });
+
+  it('a legitimate zero price is priced (not unpriced) and still yields a GP', () => {
+    const costs = computeSpecCosts('built', 12, [{ amount_ml: 50, ingredients: { cost_per_ml: 0, abv: 0 } }], {});
+    expect(costs.unpricedCount).toBe(0);
+    expect(costs.fullyPriced).toBe(true);
+    expect(costs.gpPct).not.toBeNull();
+  });
+
+  it('an empty spec is not "fully priced" (nothing to price)', () => {
+    const costs = computeSpecCosts('built', 12, [], {});
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.gpPct).toBeNull();
+  });
+});
+
+describe('computeSpecCosts — prep components', () => {
+  it('costs a prep line from the prep rollup, same as an ingredient', () => {
+    // A prep at 0.001111/ml (£1.00 batch / 900ml), poured 20ml → 0.02222
+    const costs = computeSpecCosts('stirred', 10, [
+      { amount_ml: 20, preps: { cost_per_ml: '0.0011111111', abv: 0 } },
+    ], {});
+    expect(costs.pourCost).toBeCloseTo(0.0222, 4);
+    expect(costs.fullyPriced).toBe(true);
+  });
+
+  it('a prep holding unpriced ingredients makes the spec unpriced, not cheap', () => {
+    // The store passes cost_per_ml: null when prep_costs.unpriced_count > 0 (⚑ 0007),
+    // otherwise a partial rollup would understate the drink's cost.
+    const costs = computeSpecCosts('stirred', 10, [
+      { amount_ml: 50, ingredients: { cost_per_ml: '0.04', abv: 40 } },
+      { amount_ml: 20, preps: { cost_per_ml: null, abv: 0 } },
+    ], {});
+    expect(costs.unpricedCount).toBe(1);
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.gpPct).toBeNull();
+  });
+
+  it('mixes ingredient and prep lines in one pour cost', () => {
+    const costs = computeSpecCosts('stirred', 10, [
+      { amount_ml: 50, ingredients: { cost_per_ml: '0.04', abv: 40 } }, // 2.00
+      { amount_ml: 20, preps: { cost_per_ml: '0.005', abv: 0 } },       // 0.10
+    ], {});
+    expect(costs.pourCost).toBeCloseTo(2.1);
+    expect(costs.liquidVolumeMl).toBe(70);
+    expect(costs.fullyPriced).toBe(true);
+  });
+});
