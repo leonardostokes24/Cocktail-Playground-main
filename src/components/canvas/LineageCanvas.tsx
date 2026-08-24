@@ -355,18 +355,6 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
               <button onClick={() => setShowLibrary(true)} style={toolbarBtn}>Library</button>
               <button onClick={() => setShowPreps(true)} style={toolbarBtn}>Preps</button>
               <button onClick={() => setShowVenues(true)} style={toolbarBtn}>Venues</button>
-              <button
-                onClick={() => setShowGroups(v => {
-                  const next = !v;
-                  try { localStorage.setItem('proof_show_groups', next ? '1' : '0'); } catch { /* private mode */ }
-                  return next;
-                })}
-                style={showGroups ? toggleActive : toggleInactive}
-                title={showGroups ? 'Hide lineage groups' : 'Show lineage groups'}
-                aria-pressed={showGroups}
-              >
-                Groups
-              </button>
             </>}
           </div>
           {specsLoading && <span style={loadingNote}>Loading…</span>}
@@ -544,6 +532,12 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {canvasMode === 'canvas' && user && <SelectionMenu
           onNewSpec={handleNewSpec}
+          showGroups={showGroups}
+          onToggleGroups={() => setShowGroups(v => {
+            const next = !v;
+            try { localStorage.setItem('proof_show_groups', next ? '1' : '0'); } catch { /* private mode */ }
+            return next;
+          })}
           onOpenRecipe={(o) => { setPanelOpen(true); setPanelBuilder(!!o?.builder); }}
           summon={summon}
         />}

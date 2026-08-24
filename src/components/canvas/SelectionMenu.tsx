@@ -20,7 +20,7 @@ import { computeSpecCosts } from '../../utils/calculations';
  */
 
 type ActionId =
-  | 'branch' | 'add' | 'tidy' | 'open'
+  | 'branch' | 'add' | 'groups' | 'open'
   | 'duplicate' | 'to-prep' | 'publish' | 'delete';
 
 type Action = {
@@ -35,9 +35,8 @@ const ACTIONS: Action[] = [
   { id: 'branch',    label: 'Branch' },
   { id: 'add',       label: 'Add component' },
   // 8a draws "Swap" here. Swapping needs a component to swap *from*, which this
-  // menu has no way to name, so the slot carries Tidy — a real action on the
-  // same target — rather than a cell that greys out forever.
-  { id: 'tidy',      label: 'Tidy lineage' },
+  // menu has no way to name, so the slot carries the group-hull toggle instead.
+  { id: 'groups',    label: 'Groups' },
   { id: 'open',      label: 'Open recipe' },
   { id: 'duplicate', label: 'Duplicate' },
   { id: 'to-prep',   label: 'Convert to prep' },
@@ -54,12 +53,14 @@ export type Summon = { x: number; y: number; nonce: number };
 
 interface Props {
   onNewSpec: () => void;
+  showGroups: boolean;
+  onToggleGroups: () => void;
   /** 'Open recipe' is the only route to the full editing panel now. */
   onOpenRecipe: (opts?: { builder?: boolean }) => void;
   summon: Summon | null;
 }
 
-export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props) {
+export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon, showGroups, onToggleGroups }: Props) {
   const specs        = useProofStore(s => s.specs);
   const selectedId   = useProofStore(s => s.selectedSpecId);
   const selectSpec   = useProofStore(s => s.selectSpec);
@@ -67,7 +68,6 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
   const publishSpec  = useProofStore(s => s.publishSpec);
   const removeSpec   = useProofStore(s => s.removeSpec);
   const duplicate    = useProofStore(s => s.duplicateSpecs);
-  const tidySpecs    = useProofStore(s => s.tidySpecs);
   const ingredients  = useProofStore(s => s.ingredients);
   const recentIds    = useProofStore(s => s.recentIngredientIds);
   const componentsMap = useProofStore(s => s.specComponentsMap);
@@ -211,6 +211,7 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
   // ── Running an action ──────────────────────────────────────────────────────
   const run = useCallback(async (a: Action) => {
     if (a.soon || busy) return;
+    if (a.id === 'groups') { onToggleGroups(); setOpen(false); return; }
     if (!spec) { if (a.id === 'branch') onNewSpec(); return; }
 
     if (a.id === 'delete' && !confirmDelete) { setConfirmDelete(true); return; }
@@ -222,23 +223,6 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
         case 'open':      selectSpec(spec.id); onOpenRecipe(); break;
         case 'add':       selectSpec(spec.id); onOpenRecipe({ builder: true }); break;
         case 'duplicate': await duplicate([spec.id]); break;
-        case 'tidy': {
-          // Lay out this spec's whole family, not an arbitrary selection.
-          const byId = new Map(specs.map(x => [x.id, x]));
-          const rootOf = (sid: string) => {
-            const seen = new Set([sid]);
-            let cur = byId.get(sid);
-            while (cur?.parent_spec_id) {
-              const parent = byId.get(cur.parent_spec_id);
-              if (!parent || seen.has(parent.id)) break;
-              seen.add(parent.id); cur = parent;
-            }
-            return cur?.id ?? sid;
-          };
-          const root = rootOf(spec.id);
-          await tidySpecs(specs.filter(x => rootOf(x.id) === root).map(x => x.id));
-          break;
-        }
         case 'to-prep': {
           // A prep is a batch, so its yield is the spec's finished volume —
           // dilution included, because that is what actually ends up in the jar.
@@ -278,8 +262,8 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
       setQuery('');
       setOpen(false);
     }
-  }, [spec, specs, busy, confirmDelete, branchSpec, selectSpec, duplicate, tidySpecs, componentsMap,
-      dilution, sundries, wasteRate, addPrep, addPrepComponent, publishSpec, removeSpec, onNewSpec, onOpenRecipe]);
+  }, [spec, specs, busy, confirmDelete, branchSpec, selectSpec, duplicate, componentsMap,
+      dilution, sundries, wasteRate, addPrep, addPrepComponent, publishSpec, removeSpec, onNewSpec, onOpenRecipe, onToggleGroups]);
 
   const q = query.trim().toLowerCase();
 
@@ -425,18 +409,19 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props
             <button
               key={a.id}
               onClick={() => run(a)}
-              disabled={a.soon || busy || (!spec && a.id !== 'branch')}
+              disabled={a.soon || busy || (!spec && a.id !== 'branch' && a.id !== 'groups')}
               title={a.soon ? 'Not built yet' : undefined}
               style={cell(i, matches.length, {
                 accent: a.accent,
                 soon: a.soon,
-                inert: !spec && a.id !== 'branch',
+                inert: !spec && a.id !== 'branch' && a.id !== 'groups',
                 armed: isDeleteArmed,
               })}
             >
               {isDeleteArmed
                 ? (detaching ? `Delete? ${detaching} detach` : 'Delete?')
                 : (!spec && a.id === 'branch') ? 'New spec'
+                : a.id === 'groups' ? (showGroups ? 'Hide groups' : 'Show groups')
                 : a.label}
               {a.soon && <span style={soonTag}>soon</span>}
             </button>
