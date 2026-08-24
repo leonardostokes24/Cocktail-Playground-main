@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { useNodes, useViewport } from '@xyflow/react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useNodes, useReactFlow, useViewport } from '@xyflow/react';
 import { useProofStore } from '../../store/useProofStore';
 import { groupsOf } from '../../utils/groups';
 
@@ -20,8 +20,79 @@ const LABEL_H = 20;
 
 export default function GroupLayer() {
   const specs = useProofStore(s => s.specs);
+  const editSpec = useProofStore(s => s.editSpec);
+  const removeSpecs = useProofStore(s => s.removeSpecs);
   const nodes = useNodes();
+  const { setNodes } = useReactFlow();
   const { x, y, zoom } = useViewport();
+  const [armed, setArmed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const drag = useRef<{ ids: Set<string>; lastX: number; lastY: number } | null>(null);
+  const disarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  /**
+   * Drag by the label, not the hull. The interior has to stay click-through or
+   * the group would swallow every click meant for the cards inside it, and the
+   * canvas could not be panned across its own families.
+   */
+  const startDrag = useCallback((e: React.PointerEvent, ids: string[]) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { ids: new Set(ids), lastX: e.clientX, lastY: e.clientY };
+
+    const move = (ev: PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      // Screen pixels ÷ zoom = flow units, or the group would outrun the
+      // cursor when zoomed out and lag it when zoomed in.
+      const dx = (ev.clientX - d.lastX) / zoom;
+      const dy = (ev.clientY - d.lastY) / zoom;
+      d.lastX = ev.clientX;
+      d.lastY = ev.clientY;
+      setNodes(ns => ns.map(n => (d.ids.has(n.id)
+        ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
+        : n)));
+    };
+
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const d = drag.current;
+      drag.current = null;
+      if (!d) return;
+      // Persist once at the end — one write per member, not one per frame.
+      setNodes(ns => {
+        for (const n of ns) {
+          if (d.ids.has(n.id)) editSpec(n.id, { canvas_x: n.position.x, canvas_y: n.position.y });
+        }
+        return ns;
+      });
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }, [zoom, setNodes, editSpec]);
+
+  /** Two-step, like the card corner. Deleting a group takes the whole family. */
+  const handleDelete = useCallback(async (e: React.MouseEvent, rootId: string, ids: string[]) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    if (armed !== rootId) {
+      setArmed(rootId);
+      clearTimeout(disarmTimer.current);
+      disarmTimer.current = setTimeout(() => setArmed(null), 3200);
+      return;
+    }
+    clearTimeout(disarmTimer.current);
+    setBusy(true);
+    try {
+      await removeSpecs(ids);
+      setArmed(null);
+    } finally {
+      setBusy(false);
+    }
+  }, [armed, busy, removeSpecs]);
 
   const hulls = useMemo(() => {
     const groups = groupsOf(specs);
@@ -49,6 +120,7 @@ export default function GroupLayer() {
         id: g.rootId,
         name: g.name,
         count: g.specIds.length,
+        specIds: g.specIds,
         left: minX - PAD,
         top: minY - PAD - LABEL_H,
         width: (maxX - minX) + PAD * 2,
@@ -64,9 +136,28 @@ export default function GroupLayer() {
       <div style={{ transform: `translate(${x}px, ${y}px) scale(${zoom})`, transformOrigin: '0 0' }}>
         {hulls.map(h => (
           <div key={h.id} style={{ ...hull, left: h.left, top: h.top, width: h.width, height: h.height }}>
-            <div style={label}>
-              <span>{h.name}</span>
+            <div
+              className="nodrag nopan"
+              style={label}
+              onPointerDown={e => startDrag(e, h.specIds)}
+              title="Drag to move the whole family"
+            >
+              <span style={grip} aria-hidden="true">⠿</span>
+              <span style={nameStyle}>{h.name}</span>
               <span style={countStyle}>{String(h.count).padStart(2, '0')}</span>
+              <button
+                type="button"
+                onClick={e => handleDelete(e, h.id, h.specIds)}
+                onPointerDown={e => e.stopPropagation()}
+                disabled={busy}
+                style={del(armed === h.id)}
+                aria-label={armed === h.id
+                  ? `Confirm delete all ${h.count} specs in ${h.name}`
+                  : `Delete the ${h.name} family`}
+                title={armed === h.id ? `Deletes all ${h.count} specs` : 'Delete this family'}
+              >
+                {armed === h.id ? `delete ${h.count}?` : '✕'}
+              </button>
             </div>
           </div>
         ))}
@@ -94,6 +185,28 @@ const hull: React.CSSProperties = {
   background: 'rgba(26,26,23,.045)',
 };
 
+const grip: React.CSSProperties = {
+  color: 'rgba(242,240,234,.5)',
+  letterSpacing: 0,
+};
+
+const nameStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const del = (isArmed: boolean): React.CSSProperties => ({
+  marginLeft: 2,
+  padding: isArmed ? '2px 5px' : '0 2px',
+  background: isArmed ? 'var(--accent)' : 'none',
+  border: 'none',
+  color: isArmed ? 'var(--on-ink)' : 'rgba(242,240,234,.55)',
+  font: '400 9px/1 var(--font-mono)',
+  letterSpacing: '.06em',
+  cursor: 'pointer',
+});
+
 const label: React.CSSProperties = {
   position: 'absolute',
   top: -1,
@@ -111,6 +224,10 @@ const label: React.CSSProperties = {
   whiteSpace: 'nowrap',
   maxWidth: '100%',
   overflow: 'hidden',
+  // The one interactive part of an otherwise click-through layer.
+  pointerEvents: 'auto',
+  cursor: 'grab',
+  userSelect: 'none',
 };
 
 const countStyle: React.CSSProperties = {
