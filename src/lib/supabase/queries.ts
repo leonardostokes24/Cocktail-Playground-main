@@ -85,6 +85,7 @@ export type Spec = {
   build_text: string | null;
   sale_price: number | null;
   status: 'draft' | 'published';
+  visibility: 'private' | 'published';
   published_recipe_id: string | null;
   canvas_x: number;
   canvas_y: number;

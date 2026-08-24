@@ -17,8 +17,9 @@ export default function SpecPanel({ specId, onClose }: Props) {
     specs, specComponents, componentsLoading, dilutionOverrides,
     vatRate, sundriesPerServe, wasteRate, targetGpPct, activeFormulaId,
     editSpec, setActiveFormulaId,
-    branchSpec, publishSpec,
+    branchSpec, publishSpec, unpublishSpec,
   } = useProofStore();
+  const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -65,6 +66,17 @@ export default function SpecPanel({ specId, onClose }: Props) {
       setPublishing(false);
     }
   }, [publishSpec, specId, publishing]);
+
+  const handleUnpublish = useCallback(async () => {
+    if (publishing) return;
+    setPublishing(true);
+    try {
+      await unpublishSpec(specId);
+      setConfirmUnpublish(false);
+    } finally {
+      setPublishing(false);
+    }
+  }, [unpublishSpec, specId, publishing]);
 
   if (!spec) return null;
 
@@ -206,18 +218,38 @@ export default function SpecPanel({ specId, onClose }: Props) {
         )}
       </div>
 
+      {confirmUnpublish && (
+        <p style={unpublishNote}>
+          Unpublishing removes this from search and the commons feed. The published snapshot
+          itself stays — anyone who already forked it keeps working lineage back to you, and
+          your credit travels with it.
+        </p>
+      )}
+
       {/* ── Footer: Branch + Publish ─────────────────────────── */}
       <div style={footerStyle}>
         <button onClick={handleBranch} style={branchBtnStyle}>⎇ Branch</button>
         <button onClick={() => handleExport('pdf')} style={branchBtnStyle} title="Export as PDF">PDF</button>
         <button onClick={() => handleExport('csv')} style={branchBtnStyle} title="Export as CSV — opens in Excel">CSV</button>
-        <button
-          disabled={spec.status === 'published' || publishing}
-          onClick={handlePublish}
-          style={publishBtnStyle(spec.status === 'published' || publishing)}
-        >
-          {publishing ? 'Publishing…' : spec.status === 'published' ? '✓ Published' : '↑ Publish to commons'}
-        </button>
+        {spec.status === 'published' ? (
+          confirmUnpublish ? (
+            <button onClick={handleUnpublish} disabled={publishing} style={unpublishBtnStyle}>
+              {publishing ? 'Hiding…' : 'Hide it — snapshot stays'}
+            </button>
+          ) : (
+            <button onClick={() => setConfirmUnpublish(true)} style={publishBtnStyle(false)}>
+              ✓ Published · unpublish
+            </button>
+          )
+        ) : (
+          <button
+            disabled={publishing}
+            onClick={handlePublish}
+            style={publishBtnStyle(publishing)}
+          >
+            {publishing ? 'Publishing…' : '↑ Publish to commons'}
+          </button>
+        )}
       </div>
 
       {builderOpen && <RecipeBuilder specId={specId} onClose={() => setBuilderOpen(false)} />}
@@ -389,6 +421,29 @@ const targetLabelStyle: React.CSSProperties = {
 
 const targetValueStyle: React.CSSProperties = {
   fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)', fontWeight: 500,
+};
+
+const unpublishNote: React.CSSProperties = {
+  margin: '0 16px 8px',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 11.5,
+  lineHeight: 1.5,
+  color: 'var(--text-2)',
+  borderLeft: '2px solid rgba(255,135,210,.4)',
+  paddingLeft: 10,
+};
+
+const unpublishBtnStyle: React.CSSProperties = {
+  flex: 1,
+  padding: '10px 14px',
+  borderRadius: 9,
+  background: 'linear-gradient(168deg, rgba(255,135,210,.24), rgba(255,135,210,.1))',
+  border: '1px solid rgba(255,135,210,.42)',
+  color: '#ffe2f5',
+  fontFamily: 'var(--font-ui)',
+  fontSize: 12.5,
+  fontWeight: 600,
+  cursor: 'pointer',
 };
 
 const footerStyle: React.CSSProperties = {

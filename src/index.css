@@ -265,6 +265,16 @@
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
+/* ⚑ Solid fallbacks where backdrop-filter isn't supported. Without these the
+   glass surfaces fall back to a near-transparent fill and their text lands on
+   whatever is behind them, which fails contrast outright. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass            { background: rgba(24,22,38,.97); }
+  .glass-panel      { background: rgba(18,16,32,.98); }
+  .spec-node__delete { background: rgba(28,24,44,.99); }
+  .cmd-pad::before  { background: rgba(6,5,12,.97); }
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .glass, .glass-panel {
     background: rgba(18,16,32,.95);

@@ -3,6 +3,7 @@ import { useProofStore } from '../../store/useProofStore';
 import { UNITS } from '../../utils/units';
 import CommandPad, { PAD_SIZE, type Segment } from './CommandPad';
 import { childCounts } from '../../utils/childCounts';
+import { searchCatalogueIngredients } from '../../lib/supabase/catalogue';
 import RadialSearch, { type SearchItem } from './RadialSearch';
 
 export type RadialContext =
@@ -82,6 +83,11 @@ export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPrep
   const publishSpec     = useProofStore(s => s.publishSpec);
   const specs           = useProofStore(s => s.specs);
   const preps           = useProofStore(s => s.preps);
+  const recentIds       = useProofStore(s => s.recentIngredientIds);
+  const importCatalogue = useProofStore(s => s.importCatalogueIngredient);
+  // The catalogue is a remote lookup, so it streams in beside the local list
+  // rather than blocking it — your own ingredients appear instantly either way.
+  const [catalogueHits, setCatalogueHits] = useState<SearchItem[]>([]);
 
   // Clamp so the pad stays inside the viewport
   const HALF = PAD_SIZE / 2;
@@ -105,6 +111,15 @@ export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPrep
       return { tag: 'main' };
     });
   }, [onClose]);
+
+  useEffect(() => {
+    if (phase.tag !== 'search' || phase.kind === 'prep') { setCatalogueHits([]); return; }
+    let cancelled = false;
+    searchCatalogueIngredients('', phase.categoryType ?? undefined)
+      .then(rows => { if (!cancelled) setCatalogueHits(rows.map(r => ({ id: r.id, name: r.name, type: r.type }))); })
+      .catch(() => { if (!cancelled) setCatalogueHits([]); });  // catalogue is a bonus, never a blocker
+    return () => { cancelled = true; };
+  }, [phase]);
 
   useEffect(() => {
     if (phase.tag === 'add-amount') {
@@ -187,13 +202,21 @@ export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPrep
     const { item, kind } = phase;
     const amountNum = parseFloat(amount);
     if (!amountNum || amountNum <= 0) return;
+
+    // A catalogue pick isn't yours yet. Import it unpriced first — ⚑ the shared
+    // catalogue's suggested price is never adopted on the user's behalf.
+    let resolvedId = item.id;
+    if (resolvedId.startsWith('catalogue:')) {
+      const imported = await importCatalogue(resolvedId.slice('catalogue:'.length), null);
+      resolvedId = imported.id;
+    }
     const { toMl } = await import('../../utils/units');
     const nextPos = specComponentsMap[nodeId]?.length ?? 0;
     // spec_components is ingredient XOR prep — never both.
     await addComponent({
       spec_id: nodeId,
-      ingredient_id: kind === 'ingredient' ? item.id : null,
-      prep_id: kind === 'prep' ? item.id : null,
+      ingredient_id: kind === 'ingredient' ? resolvedId : null,
+      prep_id: kind === 'prep' ? resolvedId : null,
       amount_ml: toMl(amountNum, unit),
       original_amount: amountNum,
       original_unit: unit,
@@ -201,7 +224,7 @@ export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPrep
     });
     selectSpec(nodeId);
     onClose();
-  }, [nodeId, phase, amount, unit, specComponentsMap, addComponent, selectSpec, onClose]);
+  }, [nodeId, phase, amount, unit, specComponentsMap, addComponent, selectSpec, onClose, importCatalogue]);
 
   // ── Delete confirm ────────────────────────────────────────────────────────
   const handleConfirmSelect = useCallback(async (id: string) => {
@@ -247,11 +270,29 @@ export default function RadialMenu({ context, onClose, onOpenLibrary, onOpenPrep
     : undefined;
 
   // The search phase filters here so RadialSearch stays a dumb list.
-  const searchItems: SearchItem[] = phase.tag === 'search'
+  const localItems: SearchItem[] = phase.tag === 'search'
     ? (phase.kind === 'prep'
         ? preps.map(p => ({ id: p.id, name: p.name, type: 'prep' }))
         : ingredients.filter(i => !phase.categoryType || i.type === phase.categoryType))
     : [];
+
+  // ⚑ Recents first — the radial rule. Everything else keeps its order.
+  const rank = new Map(recentIds.map((id, i) => [id, i]));
+  const ordered = [...localItems].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id)! : Infinity;
+    const rb = rank.has(b.id) ? rank.get(b.id)! : Infinity;
+    return ra - rb;
+  });
+
+  // Catalogue entries you don't own yet, appended and marked so they read as an
+  // import rather than something already in your library.
+  const ownNames = new Set(localItems.map(i => i.name.toLowerCase()));
+  const searchItems: SearchItem[] = [
+    ...ordered,
+    ...catalogueHits
+      .filter(c => !ownNames.has(c.name.toLowerCase()))
+      .map(c => ({ ...c, id: `catalogue:${c.id}`, type: c.type })),
+  ];
 
   return (
     <>

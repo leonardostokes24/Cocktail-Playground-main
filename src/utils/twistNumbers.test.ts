@@ -15,7 +15,7 @@ function spec(id: string, parent: string | null, createdAt: string): Spec {
     garnish: null,
     build_text: null,
     sale_price: null,
-    status: 'draft',
+    status: 'draft', visibility: 'private',
     published_recipe_id: null,
     canvas_x: 0,
     canvas_y: 0,

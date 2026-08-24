@@ -109,6 +109,9 @@ interface ProofState {
   componentsLoading: boolean;
   loadSpecComponents: (specId: string) => Promise<void>;
   addComponent: (input: SpecComponentInput) => Promise<void>;
+  /** ⚑ Radial rule: recents first. Ingredient ids, most recent first, capped. */
+  recentIngredientIds: string[];
+  noteRecentIngredient: (ingredientId: string) => void;
   /** Paste-a-recipe on-ramp: draft -> real spec + components. */
   ingestRecipe: (draft: RecipeDraft, at?: { x: number; y: number }) => Promise<Spec>;
   editComponent: (id: string, input: Partial<Pick<SpecComponentInput, 'amount_ml' | 'original_amount' | 'original_unit' | 'position'>>) => Promise<void>;
@@ -151,6 +154,11 @@ interface ProofState {
 
   // ── Publish + fork ────────────────────────────────────────────
   publishSpec: (specId: string) => Promise<void>;
+  /**
+   * Hide a spec from discovery. The published snapshot is NOT deleted — forks
+   * depend on it for their ancestry, and published_specs is append-only.
+   */
+  unpublishSpec: (specId: string) => Promise<void>;
   forkPublished: (publishedId: string) => Promise<Spec>;
 
   // ── Lineage (always via the get_spec_lineage RPC ⚑) ───────────
@@ -408,7 +416,14 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
       set({ componentsLoading: false });
     }
   },
+  recentIngredientIds: [],
+  noteRecentIngredient: (ingredientId) => {
+    set((s) => ({
+      recentIngredientIds: [ingredientId, ...s.recentIngredientIds.filter((i) => i !== ingredientId)].slice(0, 12),
+    }));
+  },
   addComponent: async (input) => {
+    if (input.ingredient_id) get().noteRecentIngredient(input.ingredient_id);
     const comp = await insertSpecComponent(input);
     set((s) => ({
       specComponents: [...s.specComponents, comp],
@@ -595,6 +610,12 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
 
     // Mark spec as published in local state
     await get().editSpec(specId, { status: 'published' });
+  },
+  unpublishSpec: async (specId) => {
+    // Only specs.visibility/status move. published_specs is append-only and the
+    // snapshot must survive: every fork's ancestry resolves through it.
+    await get().editSpec(specId, { status: 'draft', visibility: 'private' });
+    await get().loadPublishedFeed();
   },
   forkPublished: async (publishedId) => {
     const { newSpecId, componentsSnapshot } = await forkPublishedSpec(publishedId);
