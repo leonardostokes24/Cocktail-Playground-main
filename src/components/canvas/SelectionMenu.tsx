@@ -40,13 +40,18 @@ const ACTIONS: Action[] = [
 const PIN_KEY = 'proof_menu_pin';
 const MENU_W = 320;
 
+/** A right-click summons the menu to the pointer. The nonce makes two
+ *  right-clicks at the same point still register as two separate summons. */
+export type Summon = { x: number; y: number; nonce: number };
+
 interface Props {
   onNewSpec: () => void;
   /** 'Open recipe' is the only route to the full editing panel now. */
-  onOpenRecipe: () => void;
+  onOpenRecipe: (opts?: { builder?: boolean }) => void;
+  summon: Summon | null;
 }
 
-export default function SelectionMenu({ onNewSpec, onOpenRecipe }: Props) {
+export default function SelectionMenu({ onNewSpec, onOpenRecipe, summon }: Props) {
   const specs        = useProofStore(s => s.specs);
   const selectedId   = useProofStore(s => s.selectedSpecId);
   const selectSpec   = useProofStore(s => s.selectSpec);
@@ -64,6 +69,8 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe }: Props) {
   const [pinned, setPinned] = useState<{ x: number; y: number } | null>(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) ?? 'null'); } catch { return null; }
   });
+  // Where a right-click put it. Outranks the tether, yields to an explicit pin.
+  const [summoned, setSummoned] = useState<{ x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dragFrom = useRef<{ dx: number; dy: number } | null>(null);
 
@@ -82,9 +89,28 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe }: Props) {
   // A changed target invalidates a pending delete and the typed query.
   useEffect(() => { setConfirmDelete(false); setQuery(''); }, [selectedId]);
 
+  // A right-click drops the menu at the pointer and puts the cursor in the
+  // field, so the same gesture that used to open the radial now opens a
+  // command line onto the thing under it.
+  useEffect(() => {
+    if (!summon) return;
+    const clampedX = Math.min(Math.max(12, summon.x), window.innerWidth - MENU_W - 12);
+    const clampedY = Math.min(Math.max(64, summon.y), window.innerHeight - 380);
+    // A right-click is an explicit "come here", so it outranks — and clears — a
+    // pin. Without this, pinning once meant right-click could never move the
+    // menu again, which reads as the gesture being broken.
+    setPinned(null);
+    try { localStorage.removeItem(PIN_KEY); } catch { /* private mode */ }
+    setSummoned({ x: clampedX, y: clampedY });
+    setConfirmDelete(false);
+    setQuery('');
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [summon]);
+
   // ── Position: beside the target, flipping rather than covering it ──────────
   const anchored = useMemo(() => {
     if (pinned) return pinned;
+    if (summoned) return summoned;
     if (!spec) return { x: window.innerWidth - MENU_W - 32, y: 96 };
     const p = flowToScreenPosition({ x: spec.canvas_x, y: spec.canvas_y });
     const right = p.x + 244 * viewport.zoom + 28;
@@ -93,7 +119,7 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe }: Props) {
       x: wouldOverflow ? Math.max(16, p.x - MENU_W - 28) : right,
       y: Math.min(Math.max(72, p.y), window.innerHeight - 380),
     };
-  }, [pinned, spec, flowToScreenPosition, viewport]);
+  }, [pinned, summoned, spec, flowToScreenPosition, viewport]);
 
   // ── Keyboard: ⌘K focuses, ⌘. pins/unpins ──────────────────────────────────
   useEffect(() => {
@@ -146,8 +172,8 @@ export default function SelectionMenu({ onNewSpec, onOpenRecipe }: Props) {
     try {
       switch (a.id) {
         case 'branch':    await branchSpec(spec.id); break;
-        case 'open':
-        case 'add':       selectSpec(spec.id); onOpenRecipe(); break;
+        case 'open':      selectSpec(spec.id); onOpenRecipe(); break;
+        case 'add':       selectSpec(spec.id); onOpenRecipe({ builder: true }); break;
         case 'duplicate': await duplicate([spec.id]); break;
         case 'publish':   await publishSpec(spec.id); break;
         case 'delete':    await removeSpec(spec.id); break;

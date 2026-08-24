@@ -17,11 +17,9 @@ import IngestPanel from '../library/IngestPanel';
 import VenuePanel from '../library/VenuePanel';
 import SpecPanel from '../spec/SpecPanel';
 import SettingsPanel from '../spec/SettingsPanel';
-import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
-import ContextMenuFallback from '../radial/ContextMenuFallback';
 import { detachedBy } from '../../utils/childCounts';
 import CommonsPanel from './CommonsPanel';
-import SelectionMenu from './SelectionMenu';
+import SelectionMenu, { type Summon } from './SelectionMenu';
 import LineageStats from './LineageStats';
 
 const NODE_TYPES = { specNode: SpecNodeComponent };
@@ -71,12 +69,10 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   // tethered menu is what a click reveals, and the full panel is one explicit
   // action away. Nodes stay plain cards (8a).
   const [panelOpen, setPanelOpen] = useState(false);
+  const [panelBuilder, setPanelBuilder] = useState(false);
   const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
-  const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
-  // The pad is the menu. The list is an explicit fallback the user opts into —
-  // it used to be forced on first run, which meant a fresh profile never saw
-  // the pad at all unless it found one small button inside the fallback.
-  const [menuMode, setMenuMode] = useState<'radial' | 'list'>('radial');
+  // Right-click summons the tethered menu to the pointer (it replaced the radial).
+  const [summon, setSummon] = useState<Summon | null>(null);
   const [zoom, setZoom] = useState(100);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -270,22 +266,24 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
   const handlePanelClose = useCallback(() => {
     setPanelOpen(false);
+    setPanelBuilder(false);
     loadSpecCosts();
   }, [loadSpecCosts]);
 
   const onPaneClick = useCallback(() => {
-    if (radialCtx) { setRadialCtx(null); return; }
     if (selectedSpecId) selectSpec(null);
-  }, [radialCtx, selectedSpecId, selectSpec]);
+    setPanelOpen(false);
+  }, [selectedSpecId, selectSpec]);
 
-  const openMenu = useCallback((ctx: RadialContext) => {
-    setRadialCtx(ctx);
-    setMenuMode('radial');
-  }, []);
+  const summonMenu = useCallback((nodeId: string | null, pos: { x: number; y: number }) => {
+    selectSpec(nodeId);
+    setPanelOpen(false);
+    setSummon({ x: pos.x, y: pos.y, nonce: Date.now() });
+  }, [selectSpec]);
 
   const handleNodeLongPress = useCallback((nodeId: string, pos: { x: number; y: number }) => {
-    openMenu({ kind: 'node', nodeId, position: pos });
-  }, [openMenu]);
+    summonMenu(nodeId, pos);
+  }, [summonMenu]);
   // Keep ref in sync so SpecNode always has the latest callback without node data rebuild
   longPressRef.current = handleNodeLongPress;
 
@@ -297,14 +295,14 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const onPaneContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (!user) return;
-    openMenu({ kind: 'canvas', position: { x: e.clientX, y: e.clientY } });
-  }, [user, openMenu]);
+    summonMenu(null, { x: e.clientX, y: e.clientY });
+  }, [user, summonMenu]);
 
   const onNodeContextMenu: NodeMouseHandler = useCallback((e, node) => {
     e.preventDefault();
     if (!user) return;
-    openMenu({ kind: 'node', nodeId: node.id, position: { x: e.clientX, y: e.clientY } });
-  }, [user, openMenu]);
+    summonMenu(node.id, { x: e.clientX, y: e.clientY });
+  }, [user, summonMenu]);
 
   const handleZoomIn = useCallback(() => {
     zoomIn();
@@ -521,27 +519,15 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       )}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {canvasMode === 'canvas' && user && <LineageStats />}
-      {canvasMode === 'canvas' && user && <SelectionMenu onNewSpec={handleNewSpec} onOpenRecipe={() => setPanelOpen(true)} />}
+      {canvasMode === 'canvas' && user && <SelectionMenu
+          onNewSpec={handleNewSpec}
+          onOpenRecipe={(o) => { setPanelOpen(true); setPanelBuilder(!!o?.builder); }}
+          summon={summon}
+        />}
 
-      {selectedSpecId && panelOpen && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} />}
+      {selectedSpecId && panelOpen && <SpecPanel specId={selectedSpecId} onClose={handlePanelClose} openBuilder={panelBuilder} />}
       {canvasMode === 'commons' && <CommonsPanel onClose={() => setCanvasMode('canvas')} />}
 
-      {radialCtx && menuMode === 'radial' && (
-        <RadialMenu
-          context={radialCtx}
-          onClose={() => setRadialCtx(null)}
-          onOpenLibrary={() => setShowLibrary(true)}
-          onOpenPreps={() => setShowPreps(true)}
-          onOpenIngest={() => setShowIngest(true)}
-        />
-      )}
-      {radialCtx && menuMode === 'list' && (
-        <ContextMenuFallback
-          context={radialCtx}
-          onClose={() => setRadialCtx(null)}
-          onSwitchToRadial={() => setMenuMode('radial')}
-        />
-      )}
     </div>
   );
 }

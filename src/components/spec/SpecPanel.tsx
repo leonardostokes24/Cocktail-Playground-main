@@ -10,9 +10,11 @@ import { buildExportRows, exportFilename, exportSpecToPdf, exportSpecToCsv } fro
 interface Props {
   specId: string;
   onClose: () => void;
+  /** Open straight into the recipe builder — the menu's "Add component" route. */
+  openBuilder?: boolean;
 }
 
-export default function SpecPanel({ specId, onClose }: Props) {
+export default function SpecPanel({ specId, onClose, openBuilder = false }: Props) {
   const {
     specs, specComponents, componentsLoading, dilutionOverrides,
     vatRate, sundriesPerServe, wasteRate, targetGpPct, activeFormulaId,
@@ -20,7 +22,7 @@ export default function SpecPanel({ specId, onClose }: Props) {
     branchSpec, publishSpec, unpublishSpec,
   } = useProofStore();
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
-  const [builderOpen, setBuilderOpen] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(openBuilder);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [publishing, setPublishing] = useState(false);
