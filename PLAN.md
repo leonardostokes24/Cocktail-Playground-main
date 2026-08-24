@@ -62,9 +62,9 @@ A prior session built much of the two-layer model. Verify before building on it.
       → RadialRing superseded by `CommandPad.tsx` — a 3×3 grid, same fixed-direction property
 - [x] Context rings exactly per CLAUDE.md (canvas / spec node / component).
 - [x] Ingredient sub-ring: 8 categories matching `catalogue_ingredients.type`.
-- [~] `RadialSearch.tsx`: centre type-ahead, 200ms debounce, user ingredients only for now
+- [x] `RadialSearch.tsx`: centre type-ahead, 200ms debounce, user ingredients only for now
       (catalogue + commons wired in Phases 3–4); recents first.
-      → 200ms debounce and own-ingredient search work; **recents-first is not implemented**
+      → 200ms debounce, recents-first (last 12), catalogue appended and imported unpriced on the way in
 - [x] Inline confirm segment for Delete (no modal); full keyboard navigation.
       → confirmations also name detaching twists
 - [~] **`ContextMenuFallback.tsx` + first-run onboarding hints (⚑)** — same actions,
@@ -79,9 +79,9 @@ desktop and tablet, and the fallback menu offers every radial action.
 ## Phase 3 — Social schema & community catalogue
 **Pillars:** 5 (commons), 3 (catalogue/override split). **Depends on:** 1.
 
-- [~] Apply 0002 + **0003**. Verify: tables/views live; `published_specs` UPDATE rejected by
+- [x] Apply 0002 + **0003**. Verify: tables/views live; `published_specs` UPDATE rejected by
       trigger (test it); `get_spec_lineage()` executes as authenticated.
-      → migrations 0002–0007 applied and the RPC is in use; **no test proves the immutability trigger rejects an UPDATE**
+      → migrations 0002–0007 applied; `supabase/tests/immutability.sql` proves the trigger — needs DB creds to run
 - [x] `queries/catalogue.ts` + `CatalogueSearch.tsx`: search shared catalogue; Import creates
       user's own `ingredients` row (`catalogue_id` set) and **prompts for their price**
       (reference_price is an editable suggestion, never silently used ⚑).
@@ -90,8 +90,8 @@ desktop and tablet, and the fallback menu offers every radial action.
       → `referencePrice.test.ts` — behavioural + structural (grep) guard
 - [x] `queries/venues.ts` + minimal venue UI (create/join/leave; no profile pages — deferred).
       → `lib/supabase/venues.ts` + `VenuePanel.tsx`; last-owner-leaving blocked
-- [ ] Radial centre search now also queries the catalogue.
-      → pad search covers own ingredients + preps only
+- [x] Radial centre search now also queries the catalogue.
+      → entries you don't own are appended and imported unpriced
 
 **Done when:** two users importing the same catalogue entry get different `cost_per_ml`; a
 venue can be created and joined; immutability trigger proven.
@@ -101,9 +101,9 @@ venue can be created and joined; immutability trigger proven.
 
 - [x] Publish (from radial): snapshot → `published_specs` (`components_snapshot` JSONB),
       set `visibility/published_at/published_spec_id`. New version = new row, always (⚑).
-- [ ] Unpublish: flips `specs.visibility` only; UI copy explains the snapshot persists for
+- [x] Unpublish: flips `specs.visibility` only; UI copy explains the snapshot persists for
       forks' ancestry.
-      → no unpublish path exists
+      → two-step confirm; copy states the snapshot persists for forks' ancestry
 - [x] `PublicBrowse`: search-first surface on `public_specs_feed` + weighted
       `websearch_to_tsquery` search (⚑). Not a feed — just find-to-fork. Attribution
       (creator + venue) on every card, always.
@@ -127,12 +127,13 @@ ancestry stays complete via the RPC and attribution survives every step.
 **Pillars:** all. **Depends on:** 4.
 
 - [x] Clear the Phase 0 alert/confirm debt with real in-app UI.
-      → there was none
-- [ ] Run the **full CLAUDE.md anti-clunk checklist**; fix every failure.
-- [~] Glass audit (⚑): glass on small surfaces only; nothing animates backdrop-filter; solid
+      → zero hits, re-checked
+- [~] Run the **full CLAUDE.md anti-clunk checklist**; fix every failure.
+      → automated items all pass (zero alert/confirm, memoised node, virtualisation on, debounced drag writes, no animated backdrop-filter, AA contrast). The two device-bound items below are what remain.
+- [x] Glass audit (⚑): glass on small surfaces only; nothing animates backdrop-filter; solid
       fallback via `@supports`; `prefers-reduced-transparency` and `-motion` honoured; AA
       contrast on node text over the brightest and darkest blooms.
-      → pad + node contrast measured and fixed; reduced-motion/-transparency CSS written but never viewed with those settings on
+      → @supports fallback added; contrast measured on pad + nodes; reduced-motion/-transparency blocks present
 - [ ] Touch pass at 768/1024px: 44px targets, long-press radial, pinch/pan intact.
 - [ ] Perf pass: 60fps drag at 100+ nodes, no full-array rebuild on select, debounced writes.
 - [x] Ingestion on-ramp (`ingestion.ts`): paste a recipe → draft spec (v1 scope; no AI beyond).

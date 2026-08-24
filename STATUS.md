@@ -72,7 +72,7 @@ going too.
 
 ## What's left
 
-`PLAN.md` has now been reconciled against the code — **27 done, 6 partial, 5 open, 1 blocked**.
+`PLAN.md` has now been reconciled against the code — **32 done, 3 partial, 3 open, 1 blocked**.
 Every partial or open task carries a `→` line saying exactly what is missing.
 
 ### Built this pass
@@ -97,11 +97,18 @@ Two deliberate deviations, both flagged rather than silent:
 
 ### Still open
 
-- **Unpublish** — flips `specs.visibility` only, with copy explaining the snapshot persists for
-  forks. Not built.
-- **Recents-first** in the pad's search was never implemented.
-- **The pad's search doesn't query the catalogue** — own ingredients and preps only.
-- **No test proves the `published_specs` immutability trigger rejects an UPDATE.**
+Everything still open needs hardware, a deploy, or database credentials I don't have:
+
+- **Touch pass at 768/1024px** and **long-press on a real tablet** — all pointer input so far
+  has been mouse or simulated.
+- **60fps at 100+ nodes** — the CLAUDE.md benchmark gate. Measuring it honestly means seeding
+  100 real specs, which I wasn't willing to write into your database uninvited.
+- **Vercel smoke test** — `vite build` is clean locally; the deployed build is unchecked.
+- **The two-account round trip** (publish → search → fork → edit, ancestry and credit intact).
+  Needs a second account.
+- **`supabase/tests/immutability.sql`** is written and safe to run — it rolls back
+  unconditionally — but needs DB credentials:
+  `psql "$DATABASE_URL" -f supabase/tests/immutability.sql`
 
 ### Built but unproven
 
