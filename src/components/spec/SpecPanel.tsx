@@ -5,6 +5,7 @@ import { formulaRegistry, formulaSecondArg } from '../../utils/formulaRegistry';
 import SpecFields from './SpecFields';
 import ComponentRow from './ComponentRow';
 import RecipeBuilder from '../builder/RecipeBuilder';
+import { buildExportRows, exportFilename, exportSpecToPdf, exportSpecToCsv } from '../../utils/export';
 
 interface Props {
   specId: string;
@@ -40,6 +41,16 @@ export default function SpecPanel({ specId, onClose }: Props) {
     if (trimmed && spec && trimmed !== spec.name) editSpec(specId, { name: trimmed });
     setEditingName(false);
   };
+
+  // Export builds its rows from the same spec/costs the panel is already showing,
+  // so what lands in the file is what the user can see.
+  const handleExport = useCallback(async (fmt: 'pdf' | 'csv') => {
+    if (!spec) return;
+    const payload = buildExportRows(spec, specComponents, costs, { vatRate });
+    const filename = exportFilename(spec, fmt);
+    if (fmt === 'pdf') await exportSpecToPdf(payload, filename);
+    else exportSpecToCsv(payload, filename);
+  }, [spec, specComponents, costs, vatRate]);
 
   const handleBranch = useCallback(async () => {
     await branchSpec(specId);
@@ -198,6 +209,8 @@ export default function SpecPanel({ specId, onClose }: Props) {
       {/* ── Footer: Branch + Publish ─────────────────────────── */}
       <div style={footerStyle}>
         <button onClick={handleBranch} style={branchBtnStyle}>⎇ Branch</button>
+        <button onClick={() => handleExport('pdf')} style={branchBtnStyle} title="Export as PDF">PDF</button>
+        <button onClick={() => handleExport('csv')} style={branchBtnStyle} title="Export as CSV — opens in Excel">CSV</button>
         <button
           disabled={spec.status === 'published' || publishing}
           onClick={handlePublish}
