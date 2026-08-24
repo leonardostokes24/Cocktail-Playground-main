@@ -1,19 +1,21 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { RadialContext } from './RadialMenu';
 import { useProofStore } from '../../store/useProofStore';
+import { childCounts } from '../../utils/childCounts';
 
 interface Props {
   context: RadialContext;
   onClose: () => void;
   onSwitchToRadial: () => void;
-  firstRun: boolean;
-  onDismissFirstRun: () => void;
+  /** Onboarding hint — the fallback is now opt-in, so this is off by default. */
+  firstRun?: boolean;
+  onDismissFirstRun?: () => void;
 }
 
 type Phase = 'main' | 'confirm-delete';
 
 export default function ContextMenuFallback({
-  context, onClose, onSwitchToRadial, firstRun, onDismissFirstRun,
+  context, onClose, onSwitchToRadial, firstRun = false, onDismissFirstRun,
 }: Props) {
   const [phase, setPhase] = useState<Phase>('main');
   const menuRef = useRef<HTMLDivElement>(null);
@@ -26,6 +28,8 @@ export default function ContextMenuFallback({
   const branchSpec = useProofStore(s => s.branchSpec);
   const selectSpec = useProofStore(s => s.selectSpec);
   const removeSpec = useProofStore(s => s.removeSpec);
+  // Twists survive the delete as roots — the confirmation has to say so.
+  const detaching = nodeId ? (childCounts(specs)[nodeId] ?? 0) : 0;
 
   useEffect(() => { menuRef.current?.focus(); }, []);
 
@@ -71,7 +75,7 @@ export default function ContextMenuFallback({
   }, [nodeId, removeSpec, onClose]);
 
   const handleSwitchToRadial = useCallback(() => {
-    onDismissFirstRun();
+    onDismissFirstRun?.();
     onSwitchToRadial();
   }, [onDismissFirstRun, onSwitchToRadial]);
 
@@ -97,7 +101,11 @@ export default function ContextMenuFallback({
           </>
         ) : phase === 'confirm-delete' ? (
           <>
-            <div style={confirmHeader}>Delete this spec?</div>
+            <div style={confirmHeader}>
+              {detaching
+                ? `Delete this spec? ${detaching} twist${detaching > 1 ? 's' : ''} will detach.`
+                : 'Delete this spec?'}
+            </div>
             <Item icon="✕" label="Confirm Delete" onClick={handleDeleteConfirm} danger />
             <Item icon="←" label="Cancel" onClick={() => setPhase('main')} />
           </>

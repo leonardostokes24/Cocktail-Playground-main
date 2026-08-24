@@ -17,6 +17,7 @@ import SpecPanel from '../spec/SpecPanel';
 import SettingsPanel from '../spec/SettingsPanel';
 import RadialMenu, { type RadialContext } from '../radial/RadialMenu';
 import ContextMenuFallback from '../radial/ContextMenuFallback';
+import { detachedBy } from '../../utils/childCounts';
 import CommonsPanel from './CommonsPanel';
 
 const NODE_TYPES = { specNode: SpecNodeComponent };
@@ -60,8 +61,10 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   const [showSettings, setShowSettings] = useState(false);
   const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   const [radialCtx, setRadialCtx] = useState<RadialContext | null>(null);
+  // The pad is the menu. The list is an explicit fallback the user opts into —
+  // it used to be forced on first run, which meant a fresh profile never saw
+  // the pad at all unless it found one small button inside the fallback.
   const [menuMode, setMenuMode] = useState<'radial' | 'list'>('radial');
-  const [isFirstRun, setIsFirstRun] = useState(() => !localStorage.getItem('proof_menu_onboarded'));
   const [zoom, setZoom] = useState(100);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -170,6 +173,13 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   // ── Selection & bulk actions ─────────────────────────────────
   // React Flow owns selection state; derive the ids rather than duplicating it.
   const selectedIds = useMemo(() => rfNodes.filter(n => n.selected).map(n => n.id), [rfNodes]);
+
+  // Twists whose parent is in the selection but which aren't selected themselves
+  // survive the delete as roots. The dock names them before you commit.
+  const bulkDetaching = useMemo(
+    () => detachedBy(specs, selectedIds),
+    [specs, selectedIds],
+  );
   const selectedCount = selectedIds.length;
   const hasSelection = selectedCount > 0;
   const actionsDisabled = !hasSelection || bulkBusy;
@@ -235,12 +245,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
 
   const openMenu = useCallback((ctx: RadialContext) => {
     setRadialCtx(ctx);
-    setMenuMode(isFirstRun ? 'list' : 'radial');
-  }, [isFirstRun]);
-
-  const handleDismissFirstRun = useCallback(() => {
-    localStorage.setItem('proof_menu_onboarded', '1');
-    setIsFirstRun(false);
+    setMenuMode('radial');
   }, []);
 
   const handleNodeLongPress = useCallback((nodeId: string, pos: { x: number; y: number }) => {
@@ -431,7 +436,11 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
         <div style={dockDivider} />
         {confirmingDelete && hasSelection ? (
           <>
-            <span style={{ ...dockCount, color: '#ffb4b4' }}>Delete {selectedCount}?</span>
+            <span style={{ ...dockCount, color: '#ffb4b4' }}>
+              {bulkDetaching
+                ? `Delete ${selectedCount}? ${bulkDetaching} detach`
+                : `Delete ${selectedCount}?`}
+            </span>
             <button
               onClick={() => runBulk(removeSpecs)}
               disabled={bulkBusy}
@@ -485,15 +494,18 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       {canvasMode === 'commons' && <CommonsPanel onClose={() => setCanvasMode('canvas')} />}
 
       {radialCtx && menuMode === 'radial' && (
-        <RadialMenu context={radialCtx} onClose={() => setRadialCtx(null)} />
+        <RadialMenu
+          context={radialCtx}
+          onClose={() => setRadialCtx(null)}
+          onOpenLibrary={() => setShowLibrary(true)}
+          onOpenPreps={() => setShowPreps(true)}
+        />
       )}
       {radialCtx && menuMode === 'list' && (
         <ContextMenuFallback
           context={radialCtx}
           onClose={() => setRadialCtx(null)}
           onSwitchToRadial={() => setMenuMode('radial')}
-          firstRun={isFirstRun}
-          onDismissFirstRun={handleDismissFirstRun}
         />
       )}
     </div>

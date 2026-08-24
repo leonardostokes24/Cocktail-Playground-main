@@ -1,8 +1,10 @@
-import React, { memo, useRef, useCallback } from 'react';
+import React, { memo, useRef, useState, useEffect, useCallback } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { computeSpecCosts } from '../../utils/calculations';
 import { getFormula, formulaSecondArg } from '../../utils/formulaRegistry';
 import { useProofStore } from '../../store/useProofStore';
+import { twistNumbers } from '../../utils/twistNumbers';
+import { childCounts } from '../../utils/childCounts';
 import Glass from '../common/Glass';
 import { clampLines } from '../common/clampLines';
 import { typeDot } from '../common/typeDot';
@@ -20,8 +22,59 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
   const wasteRate        = useProofStore(s => s.wasteRate);
   const activeFormulaId  = useProofStore(s => s.activeFormulaId);
   const targetGpPct      = useProofStore(s => s.targetGpPct);
+  const removeSpec       = useProofStore(s => s.removeSpec);
+  // Numbers, so this node only re-renders when its own values move.
+  const twistNo          = useProofStore(s => twistNumbers(s.specs)[id] ?? 0);
+  const childCount       = useProofStore(s => childCounts(s.specs)[id] ?? 0);
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Corner delete is two-step: the first click arms it, the second commits.
+  // No modal, no confirm() — the button itself carries the confirmation.
+  const [armed, setArmed] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const disarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => {
+    clearTimeout(longPressTimer.current);
+    clearTimeout(disarmTimer.current);
+  }, []);
+
+  // React Flow reads pointerdown on the node to start a drag and to select.
+  // The button is its own thing, so nothing it receives may reach the canvas.
+  const swallow = useCallback((e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  }, []);
+
+  const disarm = useCallback(() => {
+    clearTimeout(disarmTimer.current);
+    setArmed(false);
+  }, []);
+
+  const handleDelete = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (deleting) return;
+
+    if (!armed) {
+      setArmed(true);
+      // An armed delete left alone shouldn't stay a live trigger under the cursor.
+      clearTimeout(disarmTimer.current);
+      disarmTimer.current = setTimeout(() => setArmed(false), 3200);
+      return;
+    }
+
+    clearTimeout(disarmTimer.current);
+    setDeleting(true);
+    try {
+      await removeSpec(id);
+      // Success unmounts this node — nothing to reset.
+    } catch {
+      // Leave the card in place and return to rest; the spec still exists.
+      setDeleting(false);
+      setArmed(false);
+    }
+  }, [armed, deleting, id, removeSpec]);
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
@@ -57,10 +110,18 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
     ? Math.max(0, Math.min(100, gpFormula.compute(costs.modifiedCost, gpSecondArg, vatRate)))
     : 0;
 
+  // Deleting a spec doesn't delete its twists — parent_spec_id is ON DELETE SET
+  // NULL, so they survive as roots. The confirmation says so rather than letting
+  // the lineage come apart quietly.
+  const confirmSentence = childCount
+    ? `Delete ${spec.name}? ${childCount} twist${childCount > 1 ? 's' : ''} will detach and become root${childCount > 1 ? 's' : ''}.`
+    : `Delete ${spec.name}?`;
+
   // Descriptor line — how the drink is made (the recipe body carries what's in it).
+  const twistLabel = twistNo ? `Twist ${twistNo}` : 'Twist';
   const descriptor = isRoot
     ? [spec.method, spec.glass].filter(Boolean).join(' · ')
-    : spec.change_note ? `Twist · ${spec.change_note}` : 'Twist';
+    : spec.change_note ? `${twistLabel} · ${spec.change_note}` : twistLabel;
 
   // Metrics collapse to one quiet footer line — pricing is secondary to the recipe.
   const metrics = costs
@@ -74,13 +135,38 @@ function SpecNode({ id, selected, data }: { id: string; selected: boolean; data:
   return (
     <Glass
       selected={selected}
-      style={{ width: 232, padding: '15px 16px', cursor: 'pointer' }}
+      style={{ width: 232, padding: '15px 16px', cursor: 'pointer', position: 'relative' }}
       onTouchStart={onTouchStart}
       onTouchEnd={clearLongPress}
       onTouchMove={clearLongPress}
       onTouchCancel={clearLongPress}
     >
       <Handle type="target" position={Position.Left} style={handle} />
+
+      <button
+        type="button"
+        className="spec-node__delete nodrag nopan"
+        data-armed={armed || undefined}
+        disabled={deleting}
+        aria-label={armed ? confirmSentence : `Delete ${spec.name}`}
+        title={armed ? confirmSentence : 'Delete'}
+        onClick={handleDelete}
+        onPointerDown={swallow}
+        onMouseDown={swallow}
+        onTouchStart={swallow}
+        onMouseLeave={disarm}
+        onBlur={disarm}
+      >
+        {armed ? (
+          <span className="spec-node__delete-label">
+            {childCount ? `Delete? ${childCount} detach` : 'Delete?'}
+          </span>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <path d="M4 7h16M10 7V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12" />
+          </svg>
+        )}
+      </button>
 
       {/* Row 1: Name + ROOT badge */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

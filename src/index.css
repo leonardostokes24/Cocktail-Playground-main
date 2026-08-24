@@ -331,6 +331,270 @@ body {
   display: none;
 }
 
+/* ── Command pad ─────────────────────────────────────────────────────────── */
+/* A 3×3 arrangement anchored at the pointer. Square, but it keeps the one
+   property that makes a radial menu fast: every action holds a fixed direction,
+   so it becomes muscle memory and stays flick-able.
+
+   Deliberately NOT a panel. There is no frame, no card, no plate — the actions
+   float over the canvas and are held together by their arrangement alone. A
+   soft vignette buys legibility without drawing an edge. */
+.cmd-pad {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 4px;
+}
+
+/* The only thing standing in for a background: a soft darkening with no edge,
+   so the labels stay readable over whatever is beneath them. */
+.cmd-pad::before {
+  content: '';
+  position: absolute;
+  inset: -22%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    closest-side circle,
+    rgba(6,5,12,.92) 58%,
+    rgba(6,5,12,.66) 78%,
+    rgba(6,5,12,0) 100%
+  );
+}
+
+.cmd-pad__blank {
+  visibility: hidden;
+}
+
+.cmd-pad__tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background .13s ease, color .13s ease;
+}
+
+/* The numpad key, in the corner of its own cell. A structural device that
+   encodes something true — press that key, get this action. */
+.cmd-pad__tile-key {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  line-height: 1;
+  /* 8px text still has to clear AA, so the key can't be dimmed into hierarchy.
+     Its size and corner placement carry that instead. */
+  color: rgba(230,228,245,.55);
+  transition: color .13s ease;
+}
+
+.cmd-pad__tile-icon {
+  display: flex;
+  opacity: .8;
+  transition: opacity .13s ease;
+}
+
+.cmd-pad__tile-label {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  line-height: 1.1;
+  text-align: center;
+}
+
+/* Boldness spent in exactly one place: the cell you are about to fire. It is
+   the only element that ever gets a filled shape. */
+.cmd-pad__tile[data-focused] {
+  background: rgba(255,255,255,.14);
+  color: var(--text);
+}
+.cmd-pad__tile[data-focused] .cmd-pad__tile-icon { opacity: 1; }
+.cmd-pad__tile[data-focused] .cmd-pad__tile-key  { color: rgba(230,228,245,.72); }
+
+.cmd-pad__tile[data-accent='create'][data-focused] {
+  background: linear-gradient(168deg, rgba(127,230,255,.28), rgba(127,230,255,.14));
+  color: #eaf9ff;
+}
+.cmd-pad__tile[data-accent='publish'][data-focused] {
+  background: linear-gradient(168deg, rgba(255,135,210,.26), rgba(255,135,210,.12));
+  color: #ffe2f5;
+}
+.cmd-pad__tile[data-accent='destroy'][data-focused] {
+  background: linear-gradient(168deg, rgba(255,110,110,.3), rgba(255,110,110,.14));
+  color: #ffe6e6;
+}
+
+.cmd-pad__tile:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+
+/* Disabled controls are exempt from the AA minimum, but .22 was simply
+   unreadable — muted enough to read as inactive, legible enough to read. */
+.cmd-pad__tile:disabled {
+  cursor: default;
+  color: rgba(230,228,245,.42);
+}
+.cmd-pad__tile:disabled .cmd-pad__tile-icon { opacity: .35; }
+.cmd-pad__tile:disabled .cmd-pad__tile-key  { display: none; }
+
+/* The signature: a fixed anchor naming what you are acting on. Bare type — no
+   well, no chip. It is the still point the actions are arranged around. */
+.cmd-pad__centre {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px;
+  text-align: center;
+}
+
+.cmd-pad__centre--wide {
+  grid-column: 1 / -1;
+  padding: 4px 10px;
+}
+
+.cmd-pad__centre--wide .cmd-pad__centre-label {
+  font-size: 15px;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.cmd-pad__centre-label {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  color: var(--text);
+  line-height: 1.12;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  text-shadow: var(--fringe-cyan), var(--fringe-mag);
+}
+
+.cmd-pad__centre-sub {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: .04em;
+  color: rgba(230,228,245,.58);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .cmd-pad::before {
+    background: radial-gradient(
+      closest-side circle,
+      rgba(6,5,12,1) 55%,
+      rgba(6,5,12,.9) 78%,
+      rgba(6,5,12,0) 100%
+    );
+  }
+}
+
+/* ── Node corner delete ──────────────────────────────────────────────────── */
+/* Sits off the card's top-right corner. Kept out of sight until the node is
+   hovered or selected — 100 nodes must not read as 100 delete buttons — and
+   inert while hidden, so an invisible target can never eat a click. */
+.spec-node__delete {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px;
+  background: rgba(28,24,44,.92);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--text-2);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .16s ease, color .16s ease, background .16s ease, border-color .16s ease;
+}
+
+/* 44×44 tap target without inflating the 24px visual. */
+.spec-node__delete::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.react-flow__node:hover .spec-node__delete,
+.glass--selected .spec-node__delete,
+.spec-node__delete:focus-visible,
+.spec-node__delete[data-armed] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.spec-node__delete:hover {
+  color: #ffc2c2;
+  border-color: rgba(255,120,120,.45);
+  background: rgba(62,22,32,.94);
+}
+
+.spec-node__delete:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* Armed — the next click deletes, so it stops looking like the resting state. */
+.spec-node__delete[data-armed] {
+  color: #ffe0e0;
+  border-color: rgba(255,120,120,.7);
+  background: rgba(122,28,42,.96);
+}
+
+.spec-node__delete:disabled {
+  cursor: default;
+}
+
+.spec-node__delete-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+
+/* No hover to reveal it — show it outright. */
+@media (hover: none) {
+  .spec-node__delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Far zoom: too small to hit deliberately, and the card is a glyph by then. */
+[data-zoom='far'] .spec-node__delete {
+  display: none;
+}
+
 /* ── React Flow overrides ────────────────────────────────────────────────── */
 /* Edge paths are handled by CustomEdge; don't override stroke here */
 .react-flow__handle {
