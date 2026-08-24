@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { RecipeDraft } from '../utils/ingestion';
 import { toMl } from '../utils/units';
-import { placeChild, placeRoot } from '../utils/layout';
+import { placeChild, placeRoot, tidyTree } from '../utils/layout';
 import { persist } from 'zustand/middleware';
 import { DILUTION_DEFAULTS } from '../utils/calculations';
 import { DEFAULT_FORMULA_ID } from '../utils/formulaRegistry';
@@ -311,20 +311,14 @@ export const useProofStore = create<ProofState>()(persist((set, get) => ({
   },
   layoutNonce: 0,
   tidySpecs: async (ids) => {
-    const chosen = get().specs.filter((s) => ids.includes(s.id));
-    if (!chosen.length) return;
+    // No selection means the whole canvas. Requiring a marquee-select before you
+    // may straighten the tree is friction for nothing.
+    const target = ids.length ? ids : get().specs.map((s) => s.id);
+    const placed = tidyTree(get().specs, target);
+    if (!placed.size) return;
 
-    // Keep the cluster where it is, then lay it out in reading order.
-    const originX = Math.min(...chosen.map((s) => s.canvas_x));
-    const originY = Math.min(...chosen.map((s) => s.canvas_y));
-    const perRow = Math.ceil(Math.sqrt(chosen.length));
-    const ordered = [...chosen].sort((a, b) => (a.canvas_y - b.canvas_y) || (a.canvas_x - b.canvas_x));
-
-    for (let i = 0; i < ordered.length; i++) {
-      await get().editSpec(ordered[i].id, {
-        canvas_x: originX + (i % perRow) * 300,
-        canvas_y: originY + Math.floor(i / perRow) * 300,
-      });
+    for (const [id, at] of placed) {
+      await get().editSpec(id, { canvas_x: at.x, canvas_y: at.y });
     }
     set((st) => ({ layoutNonce: st.layoutNonce + 1 }));
   },

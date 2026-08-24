@@ -18,7 +18,7 @@ within a day of each other. One file, one truth.
 
 ## Where we are
 
-`lint` 0 · **131 tests green** · `build` clean.
+`lint` 0 · **140 tests green** · `build` clean.
 
 **Built and verified in the running app:** the lineage canvas with vertical top-to-bottom
 routing and orthogonal edges · branching and twist numbering · the capture menu (right-click /
@@ -31,10 +31,7 @@ unpublish and fork with cross-creator lineage through the RPC · preps · venues
 hardware · 60fps at 100+ nodes · reduced-motion rendering · anything on a deployed build.
 
 ### Known broken
-- **`Tidy` does not move nodes.** The canvas preserves React Flow's live positions across a
-  rebuild, so store position writes never reach the screen. A `layoutNonce` meant to make the
-  rebuild take stored coordinates is wired through and still has no effect. Predates the menu —
-  it has never worked from the dock either.
+- Nothing known-broken. `Tidy` was fixed 2026-08-24.
 
 ### Repo state
 Three branches form a **linear stack**, so consolidation needs no cherry-picking:
@@ -47,8 +44,10 @@ never pushed) → `feat/proof-new-ui` (+32, contains everything).
 ## M0 — Consolidate
 **Done when:** one trunk, docs true against it, nothing known-broken merged in silence.
 
-- [ ] Fix `Tidy`, or remove it from the dock. Shipping a control that does nothing violates
-      CLAUDE.md's last DO-NOT.
+- [x] Fix `Tidy`.
+      → the defect was a ref mutated inside a React state updater; StrictMode double-invokes
+      updaters, so the second pass discarded the layout. Also replaced the √n grid with a
+      real vertical tree, and made it work with nothing selected.
 - [ ] Merge `feat/proof-new-ui` to `master`; close PR #1 as subsumed.
 - [ ] Resolve `origin/main` vs `origin/master`.
 - [ ] Delete the two retired branches. Delete `STATUS.md`.

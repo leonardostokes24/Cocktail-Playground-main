@@ -67,3 +67,73 @@ describe('placeRoot', () => {
     expect(p.y).toBe(200);
   });
 });
+
+import { tidyTree } from './layout';
+
+describe('tidyTree', () => {
+  const tree = () => [
+    spec('root', null, 500, 500),
+    spec('a', 'root', 999, 999),
+    spec('b', 'root', 10, 10),
+    spec('gc', 'a', 300, 20),
+  ];
+  const ids = (ss: Spec[]) => ss.map(s => s.id);
+
+  it('puts depth on the row axis — parent above its children', () => {
+    const t = tree();
+    const p = tidyTree(t, ids(t));
+    expect(p.get('a')!.y).toBe(p.get('root')!.y + ROW_PITCH);
+    expect(p.get('gc')!.y).toBe(p.get('root')!.y + ROW_PITCH * 2);
+  });
+
+  it('spreads siblings across columns without overlapping', () => {
+    const t = tree();
+    const p = tidyTree(t, ids(t));
+    expect(p.get('a')!.x).not.toBe(p.get('b')!.x);
+    expect(Math.abs(p.get('a')!.x - p.get('b')!.x)).toBeGreaterThanOrEqual(COL_PITCH);
+  });
+
+  it('centres a parent over the span its subtree occupies', () => {
+    // root has two branches, so it sits between them, not on top of one.
+    const t = tree();
+    const p = tidyTree(t, ids(t));
+    const kids = [p.get('a')!.x, p.get('b')!.x];
+    expect(p.get('root')!.x).toBeCloseTo((Math.min(...kids) + Math.max(...kids)) / 2, 5);
+  });
+
+  it('keeps the cluster where it was rather than teleporting it', () => {
+    const t = tree();
+    const p = tidyTree(t, ids(t));
+    const minX = Math.min(...[...p.values()].map(v => v.x));
+    const minY = Math.min(...[...p.values()].map(v => v.y));
+    expect(minX).toBe(10);   // smallest canvas_x in the set
+    expect(minY).toBe(10);   // smallest canvas_y
+  });
+
+  it('treats a spec whose parent is outside the selection as a root', () => {
+    const t = tree();
+    const p = tidyTree(t, ['a', 'gc']);          // root and b not selected
+    expect(p.size).toBe(2);
+    expect(p.get('gc')!.y).toBe(p.get('a')!.y + ROW_PITCH);
+  });
+
+  it('separates unrelated families', () => {
+    const t = [spec('r1', null, 0, 0), spec('x', 'r1', 0, 0), spec('r2', null, 0, 0)];
+    const p = tidyTree(t, ids(t));
+    expect(p.get('r2')!.x).toBeGreaterThan(p.get('r1')!.x);
+  });
+
+  it('is stable — tidying twice gives the same answer', () => {
+    const t = tree();
+    expect([...tidyTree(t, ids(t))]).toEqual([...tidyTree(t, ids(t))]);
+  });
+
+  it('terminates on a parent cycle', () => {
+    const cyc = [spec('x', 'y', 0, 0), spec('y', 'x', 0, 0)];
+    expect(() => tidyTree(cyc, ids(cyc))).not.toThrow();
+  });
+
+  it('returns nothing for an empty selection', () => {
+    expect(tidyTree(tree(), []).size).toBe(0);
+  });
+});

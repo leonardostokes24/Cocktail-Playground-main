@@ -104,17 +104,22 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [user?.id]);
 
   useEffect(() => {
+    // A layout pass (Tidy) is the one case where stored coordinates must win:
+    // otherwise the live positions preserved below discard the new layout.
+    //
+    // This is computed HERE, not inside the updater. StrictMode double-invokes
+    // updaters to surface impure ones: mutating the ref in there made the second
+    // call see takeStored === false and return the old positions, so every Tidy
+    // computed a correct layout and then threw it away.
+    const takeStored = layoutRef.current !== layoutNonce;
+    layoutRef.current = layoutNonce;
+
     setRfNodes(current => {
       // Carry live canvas state across the rebuild. Position AND selection live in
       // React Flow, not the store — dropping `selected` here silently cleared the
       // selection on every specs change (e.g. the debounced drag-position save),
       // which made the bulk actions look broken.
       const liveById = new Map(current.map(n => [n.id, n]));
-      // A layout pass (Tidy) is the one case where stored coordinates must win:
-      // otherwise the live positions preserved here silently discard the new
-      // layout and Tidy appears to do nothing at all.
-      const takeStored = layoutRef.current !== layoutNonce;
-      layoutRef.current = layoutNonce;
       return specs.map(spec => {
         const live = liveById.get(spec.id);
         return {
@@ -246,8 +251,10 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   }, [setRfNodes, selectSpec]);
 
   // Every bulk action ends with the selection cleared, so the dock returns to rest.
-  const runBulk = useCallback(async (fn: (ids: string[]) => Promise<void>) => {
-    if (!selectedIds.length || bulkBusy) return;
+  // allowEmpty: Tidy is meaningful with nothing selected (it straightens the
+  // whole canvas); every other bulk action needs a target.
+  const runBulk = useCallback(async (fn: (ids: string[]) => Promise<void>, allowEmpty = false) => {
+    if ((!selectedIds.length && !allowEmpty) || bulkBusy) return;
     setBulkBusy(true);
     setBulkError(null);
     try {
@@ -492,7 +499,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
               {hasSelection ? `${selectedCount} selected` : 'None selected'}
             </span>
             <button onClick={() => runBulk(duplicateSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Duplicate</button>
-            <button onClick={() => runBulk(tidySpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Tidy</button>
+            <button onClick={() => runBulk(tidySpecs, true)} disabled={bulkBusy} style={dockActionBtn(bulkBusy)} title="Straighten the lineage — the whole canvas if nothing is selected">Tidy</button>
             <button onClick={() => runBulk(publishSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Publish</button>
             <button
               onClick={() => setConfirmingDelete(true)}

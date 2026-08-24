@@ -52,3 +52,77 @@ export function placeRoot(specs: Spec[]): { x: number; y: number } {
   const minY = Math.min(...specs.map(s => s.canvas_y));
   return { x: maxX + COL_PITCH + 60, y: minY };
 }
+
+/**
+ * Lay a set of specs out as a vertical lineage tree.
+ *
+ * Depth becomes the row, siblings spread across columns, and a parent is
+ * centred over the span its subtree occupies. Replaces a √n grid, which moved
+ * nodes but destroyed the one thing the canvas is for — you could not read
+ * which drink came from which.
+ *
+ * Pure: returns coordinates, writes nothing. A spec whose parent isn't in the
+ * set is treated as a root, so tidying a selection doesn't drag in its cousins.
+ */
+export function tidyTree(specs: Spec[], ids: string[]): Map<string, { x: number; y: number }> {
+  const inSet = new Set(ids);
+  const chosen = specs.filter(s => inSet.has(s.id));
+  const out = new Map<string, { x: number; y: number }>();
+  if (!chosen.length) return out;
+
+  const byId = new Map(chosen.map(s => [s.id, s]));
+  const children = new Map<string, Spec[]>();
+  const roots: Spec[] = [];
+
+  // Stable ordering, so tidying twice gives the same answer.
+  const ordered = [...chosen].sort((a, b) =>
+    a.created_at === b.created_at ? a.id.localeCompare(b.id) : a.created_at.localeCompare(b.created_at));
+
+  for (const s of ordered) {
+    const parent = s.parent_spec_id && byId.has(s.parent_spec_id) ? s.parent_spec_id : null;
+    if (!parent) { roots.push(s); continue; }
+    const bucket = children.get(parent);
+    if (bucket) bucket.push(s); else children.set(parent, [s]);
+  }
+
+  // Width of a subtree in columns. Cycle-guarded: a corrupt parent chain must
+  // not recurse forever.
+  const widthCache = new Map<string, number>();
+  const width = (id: string, seen: Set<string>): number => {
+    if (widthCache.has(id)) return widthCache.get(id)!;
+    if (seen.has(id)) return 1;
+    seen.add(id);
+    const kids = children.get(id) ?? [];
+    const w = kids.length ? kids.reduce((sum, k) => sum + width(k.id, seen), 0) : 1;
+    widthCache.set(id, w);
+    return w;
+  };
+
+  const place = (id: string, depth: number, startCol: number, seen: Set<string>) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    const kids = children.get(id) ?? [];
+    const w = width(id, new Set());
+    // Centre the parent over its own span.
+    out.set(id, { x: startCol * COL_PITCH + ((w - 1) * COL_PITCH) / 2, y: depth * ROW_PITCH });
+    let col = startCol;
+    for (const kid of kids) {
+      place(kid.id, depth + 1, col, seen);
+      col += width(kid.id, new Set());
+    }
+  };
+
+  const seen = new Set<string>();
+  let col = 0;
+  for (const root of roots) {
+    place(root.id, 0, col, seen);
+    col += width(root.id, new Set()) + 1;   // a blank column between families
+  }
+
+  // Anchor the whole layout where the cluster already was, so Tidy straightens
+  // the tree without teleporting it across the canvas.
+  const originX = Math.min(...chosen.map(s => s.canvas_x));
+  const originY = Math.min(...chosen.map(s => s.canvas_y));
+  for (const [id, p] of out) out.set(id, { x: originX + p.x, y: originY + p.y });
+  return out;
+}
