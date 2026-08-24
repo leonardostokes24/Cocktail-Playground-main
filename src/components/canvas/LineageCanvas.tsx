@@ -71,6 +71,10 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
   // action away. Nodes stay plain cards (8a).
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelBuilder, setPanelBuilder] = useState(false);
+  // Group hulls are a view preference, so it survives a reload.
+  const [showGroups, setShowGroups] = useState(() => {
+    try { return localStorage.getItem('proof_show_groups') !== '0'; } catch { return true; }
+  });
   const [canvasMode, setCanvasMode] = useState<'canvas' | 'commons'>('canvas');
   // Right-click summons the tethered menu to the pointer (it replaced the radial).
   const [summon, setSummon] = useState<Summon | null>(null);
@@ -351,6 +355,18 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
               <button onClick={() => setShowLibrary(true)} style={toolbarBtn}>Library</button>
               <button onClick={() => setShowPreps(true)} style={toolbarBtn}>Preps</button>
               <button onClick={() => setShowVenues(true)} style={toolbarBtn}>Venues</button>
+              <button
+                onClick={() => setShowGroups(v => {
+                  const next = !v;
+                  try { localStorage.setItem('proof_show_groups', next ? '1' : '0'); } catch { /* private mode */ }
+                  return next;
+                })}
+                style={showGroups ? toggleActive : toggleInactive}
+                title={showGroups ? 'Hide lineage groups' : 'Show lineage groups'}
+                aria-pressed={showGroups}
+              >
+                Groups
+              </button>
             </>}
           </div>
           {specsLoading && <span style={loadingNote}>Loading…</span>}
@@ -412,7 +428,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           deleteKeyCode={null}
           proOptions={{ hideAttribution: true }}
         >
-          <GroupLayer />
+          {showGroups && <GroupLayer />}
           <Background color="var(--dot)" gap={26} size={1} />
         </ReactFlow>
 
