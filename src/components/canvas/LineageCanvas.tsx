@@ -500,6 +500,18 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
             </span>
             <button onClick={() => runBulk(duplicateSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Duplicate</button>
             <button onClick={() => runBulk(tidySpecs, true)} disabled={bulkBusy} style={dockActionBtn(bulkBusy)} title="Straighten the lineage — the whole canvas if nothing is selected">Tidy</button>
+            <button
+              onClick={() => setShowGroups(v => {
+                const next = !v;
+                try { localStorage.setItem('proof_show_groups', next ? '1' : '0'); } catch { /* private mode */ }
+                return next;
+              })}
+              style={dockToggleBtn(showGroups)}
+              aria-pressed={showGroups}
+              title={showGroups ? 'Hide lineage groups' : 'Show lineage groups'}
+            >
+              Groups
+            </button>
             <button onClick={() => runBulk(publishSpecs)} disabled={actionsDisabled} style={dockActionBtn(actionsDisabled)}>Publish</button>
             <button
               onClick={() => setConfirmingDelete(true)}
@@ -539,12 +551,6 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {canvasMode === 'canvas' && user && <SelectionMenu
           onNewSpec={handleNewSpec}
-          showGroups={showGroups}
-          onToggleGroups={() => setShowGroups(v => {
-            const next = !v;
-            try { localStorage.setItem('proof_show_groups', next ? '1' : '0'); } catch { /* private mode */ }
-            return next;
-          })}
           onOpenRecipe={(o) => { setPanelOpen(true); setPanelBuilder(!!o?.builder); }}
           summon={summon}
         />}

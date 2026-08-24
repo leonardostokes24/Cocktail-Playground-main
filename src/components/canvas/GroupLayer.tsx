@@ -28,17 +28,21 @@ export default function GroupLayer() {
   const [armed, setArmed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const drag = useRef<{ ids: Set<string>; lastX: number; lastY: number } | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
   const disarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   /**
-   * Drag by the label, not the hull. The interior has to stay click-through or
-   * the group would swallow every click meant for the cards inside it, and the
-   * canvas could not be panned across its own families.
+   * Drag the hull itself. The cards render above this layer, so a press on the
+   * visible margin grabs the whole family while a press on a card still reaches
+   * the card — no dead zone, and no need to hunt for a small handle.
    */
-  const startDrag = useCallback((e: React.PointerEvent, ids: string[]) => {
+  const startDrag = useCallback((e: React.PointerEvent, ids: string[], groupId: string) => {
+    // Only a primary press, and never from the delete button.
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     drag.current = { ids: new Set(ids), lastX: e.clientX, lastY: e.clientY };
+    setDragging(groupId);
 
     const move = (ev: PointerEvent) => {
       const d = drag.current;
@@ -59,6 +63,7 @@ export default function GroupLayer() {
       window.removeEventListener('pointerup', up);
       const d = drag.current;
       drag.current = null;
+      setDragging(null);
       if (!d) return;
       // Persist once at the end — one write per member, not one per frame.
       setNodes(ns => {
@@ -135,13 +140,14 @@ export default function GroupLayer() {
     <div style={layer}>
       <div style={{ transform: `translate(${x}px, ${y}px) scale(${zoom})`, transformOrigin: '0 0' }}>
         {hulls.map(h => (
-          <div key={h.id} style={{ ...hull, left: h.left, top: h.top, width: h.width, height: h.height }}>
-            <div
-              className="nodrag nopan"
-              style={label}
-              onPointerDown={e => startDrag(e, h.specIds)}
-              title="Drag to move the whole family"
-            >
+          <div
+            key={h.id}
+            className="nodrag nopan"
+            style={{ ...(dragging === h.id ? hullDragging : hull), left: h.left, top: h.top, width: h.width, height: h.height }}
+            onPointerDown={e => startDrag(e, h.specIds, h.id)}
+            title="Drag to move the whole family"
+          >
+            <div style={label}>
               <span style={grip} aria-hidden="true">⠿</span>
               <span style={nameStyle}>{h.name}</span>
               <span style={countStyle}>{String(h.count).padStart(2, '0')}</span>
@@ -173,7 +179,11 @@ const layer: React.CSSProperties = {
   inset: 0,
   overflow: 'hidden',
   pointerEvents: 'none',
-  zIndex: 0,
+  // React Flow stacks pane at 1 and viewport at 2. At 0 the pane sat above this
+  // layer and swallowed every press aimed at a hull, so the group looked
+  // draggable and wasn't. At 1, later DOM order puts it above the pane while
+  // the viewport — and therefore every card — still paints on top.
+  zIndex: 1,
 };
 
 /* Ghost, but legible: on paper at 2.5% a wash is literally invisible. A dashed
@@ -183,6 +193,18 @@ const hull: React.CSSProperties = {
   position: 'absolute',
   border: '1px dashed rgba(26,26,23,.34)',
   background: 'rgba(26,26,23,.045)',
+  // The hull itself is the drag surface. Its interior is covered by the cards,
+  // which sit above this layer, so a press on the visible margin grabs the
+  // family and a press on a card still reaches the card.
+  pointerEvents: 'auto',
+  cursor: 'grab',
+};
+
+const hullDragging: React.CSSProperties = {
+  ...hull,
+  cursor: 'grabbing',
+  background: 'rgba(26,26,23,.075)',
+  borderStyle: 'solid',
 };
 
 const grip: React.CSSProperties = {
@@ -224,9 +246,7 @@ const label: React.CSSProperties = {
   whiteSpace: 'nowrap',
   maxWidth: '100%',
   overflow: 'hidden',
-  // The one interactive part of an otherwise click-through layer.
   pointerEvents: 'auto',
-  cursor: 'grab',
   userSelect: 'none',
 };
 
