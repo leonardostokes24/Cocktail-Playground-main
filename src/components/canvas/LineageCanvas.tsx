@@ -20,6 +20,7 @@ import SettingsPanel from '../spec/SettingsPanel';
 import { detachedBy } from '../../utils/childCounts';
 import CommonsPanel from './CommonsPanel';
 import SelectionMenu, { type Summon } from './SelectionMenu';
+import GroupLayer from './GroupLayer';
 
 const NODE_TYPES = { specNode: SpecNodeComponent };
 const EDGE_TYPES = { default: GradientEdge };
@@ -411,6 +412,7 @@ export default function LineageCanvas({ user, onLoginClick, onLogoutClick }: Pro
           deleteKeyCode={null}
           proOptions={{ hideAttribution: true }}
         >
+          <GroupLayer />
           <Background color="var(--dot)" gap={26} size={1} />
         </ReactFlow>
 
